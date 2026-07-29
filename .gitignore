@@ -1,0 +1,5 @@
+.trash/
+mlruns/
+__pycache__/
+chroma_db/
+src\RAG\models
