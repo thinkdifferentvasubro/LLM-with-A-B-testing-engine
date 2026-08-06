@@ -50,23 +50,6 @@ Args:
             entry; if two groups both need to act as baseline, split into
             separate episodes instead.
 
-        covariate_cols (list[str]): Covariate-eligible = PRE-TREATMENT
-            columns only — variables that already exist before treatment
-            assignment and cannot be influenced by the experiment (e.g.
-            age, region, device, OS, tenure, traffic source, visit
-            day/time, pre-test behaviour).
-
-            Never use any column that is measured, updated, or derived
-            after treatment, even if it's not the selected metric. This
-            includes outcomes, exposure variables, and any statistics or
-            summaries computed from post-treatment events.
-
-            Never include: allocation columns, the selected metric, any
-            other outcome/post-treatment column, user-excluded metrics,
-            identifiers, or free-text columns. Never reuse excluded
-            metrics as covariates. If uncertain whether a column is pre-
-            or post-treatment, exclude it.
-
         metrics (list[str]): One metric per episode unless the user
             explicitly requests multiple. If one outcome metric is
             selected, all other outcome metrics are ignored rather than
@@ -88,14 +71,23 @@ Args:
             - treatment > control    -> less
             - treatment < control    -> greater
 
-    covariate_imbalance (dict[str, float]): SMD > 0.1 means the covariate
-        is meaningfully imbalanced. Don't silently drop imbalanced
-        covariates from the episode — explicitly flag them in your
-        output/explanation, citing the actual SMD value, so the user
-        understands the comparison may be confounded. Higher SMD means a
-        stronger caveat; don't treat all flagged covariates as equally
-        severe. If no covariate_imbalance dict is provided, or nothing
-        exceeds 0.1, don't mention imbalance at all.
+    Covariate_cols (list[str]): Covariate-eligible = PRE-TREATMENT
+            columns only — variables that already exist before treatment
+            assignment and cannot be influenced by the experiment (e.g.
+            age, region, device, OS, tenure, traffic source, visit
+            day/time, pre-test behaviour).
+
+            Never use any column that is measured, updated, or derived
+            after treatment, even if it's not the selected metric. This
+            includes outcomes, exposure variables, and any statistics or
+            summaries computed from post-treatment events.
+
+            Never include: allocation columns, the selected metric, any
+            other outcome/post-treatment column, user-excluded metrics,
+            identifiers, or free-text columns. Never reuse excluded
+            metrics as covariates. If uncertain whether a column is pre-
+            or post-treatment, exclude it.
+        
 
     num_col_with_str_vals (dict[str, str]): Columns like "10 kg" or
         "3 apples" that mix a numeric value with text, flagged here for

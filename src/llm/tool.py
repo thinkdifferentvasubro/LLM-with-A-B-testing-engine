@@ -11,7 +11,7 @@ def run_ab_test_analysis(
     episodes: list[dict],
     Covariate_cols: list[str],
     num_col_with_str_vals: dict,
-    date_and_format: dict,
+    date_and_formats: dict,
     cat_cols: list[str],
     num_cols: list[str],
     dataset: pd.DataFrame,
@@ -23,7 +23,7 @@ def run_ab_test_analysis(
     Covariate_cols=Covariate_cols,
     num_col_with_str_vals=num_col_with_str_vals,
     dataset=dataset,
-    date_and_formats=date_and_format,
+    date_and_formats=date_and_formats,
     cat_cols=cat_cols,
     num_cols=num_cols
     ).run_pipeline()

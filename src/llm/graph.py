@@ -36,8 +36,8 @@ class IntentClassifier(BaseModel):
 class test_params(BaseModel):
     episodes: list[dict]
     Covariate_cols: list[str]
-    cat_columns: list[str]
-    num_columns: list[str]
+    cat_cols: list[str]
+    num_cols: list[str]
     date_and_formats: dict
     num_col_with_str_vals: dict
 
