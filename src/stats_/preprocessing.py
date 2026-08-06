@@ -3,23 +3,22 @@ from sklearn.impute import KNNImputer, SimpleImputer
 from sklearn.preprocessing import MinMaxScaler
 from feature_engine.outliers import Winsorizer
 import numpy as np
-from typing import Union, List
 
 class Preprocessor:
     def __init__(self,
                  episodes: list[dict],
                  Covariate_cols: list[str],
                  num_col_with_str_vals: dict,
-                 csv_path: str,
+                 dataset: pd.DataFrame,
                  date_and_formats: dict,
                  cat_cols: list[str],
-                 num_cols: List[str]):
+                 num_cols: list[str]):
         
         
         self.Covariate_cols = Covariate_cols
         self.episodes = episodes
         self.num_col_with_str_vals = num_col_with_str_vals
-        self.csv_path = csv_path
+        self.dataset = dataset
         self.Assignment_cols = []
         self.Final_metric_col = []
         self.date_and_formats = date_and_formats
@@ -27,7 +26,7 @@ class Preprocessor:
         self.num_cols = num_cols
 
     def run_pipeline(self):
-        dataset = self.load_ab_test_data()
+        dataset = self.dataset
         self.Assignment_cols, self.Final_metric_col =  self.extract_episode_columns()
         cols = self.Assignment_cols + self.Final_metric_col + self.Covariate_cols
         dataset = dataset[cols]
@@ -39,9 +38,6 @@ class Preprocessor:
         warnings = self.Covariate_Balance_Check(dataset=dataset)
 
         return dataset, warnings
-    
-    def load_ab_test_data(self):
-        return pd.read_csv(self.csv_path)
 
     def remove_duplicates(self, dataset: pd.DataFrame):
         return dataset.drop_duplicates()

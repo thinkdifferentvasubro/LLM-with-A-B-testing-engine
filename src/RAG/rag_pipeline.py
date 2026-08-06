@@ -54,11 +54,10 @@ class VectorDBManager:
         existing = self.collection.get(ids=[doc_id])
         return len(existing.get("ids", [])) > 0
 
-    def save_data(self, document: str, user_id: str = None, id: str = None):
+    def save_data(self, document: str, user_id: str = None):
         content_hash = self._hash_document(document, user_id)
 
-        if id is None:
-            id = content_hash
+        id = content_hash
 
         if self._document_exists(id):
             return None

@@ -1,123 +1,202 @@
+import os
 from langchain_google_genai import ChatGoogleGenerativeAI
-from tool import run_ab_test_analysis, generate_csv_schema
+from tool import run_ab_test_analysis, generate_csv_schema, rag_search
+from langgraph.graph.message import add_messages
+from langgraph.graph import StateGraph, START, END
+from typing import TypedDict, Literal, Annotated, NotRequired
+from pydantic import BaseModel, Field
+from langgraph.checkpoint.memory import InMemorySaver
+from langchain_core.messages import trim_messages
+import uuid
 
-SYSTEM_PROMPT = """
-Configure A/B tests from the user's request and the dataset schema.
-Never invent columns or values. This is the single source of truth for
-all decision logic — field shapes/types are defined in the tool docstring.
 
-Episodes
-- One episode per control/treatment comparison.
-- If no comparison is specified, use the dataset's natural control/treatment split.
-- If no metric is specified, create one episode per outcome metric.
-- Ignore user-excluded columns.
-- Normally one allocation column per episode unless the user explicitly
-  compares multiple. For multi-group tests (anova, kruskalwallis, manova),
-  choose a sensible reference group if none is specified.
-- If the user requests a comparison across multiple groups without specifying
-  a control or reference group, choose one group as the reference (control)
-  and treat the remaining groups as comparison (treatment) groups.
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ab_prompt_PATH = os.path.join(BASE_DIR, "a-b_prompt.txt")
+rag_prompt_path = os.path.join(BASE_DIR, "rag_prompt.txt")
 
-Metrics
-- One metric per episode unless the user explicitly requests multiple.
-- Never reuse excluded metrics as covariates.
-- If one outcome metric is selected, all other outcome metrics are ignored
-  rather than treated as covariates.
-
-Statistical test
-- Use the named test only if the user explicitly requests it.
-- Otherwise leave test="" for automatic selection.
-
-Tail
-Output only: "", "greater", "less"
-Interpretation is always control vs treatment. Normalize wording:
-- control > treatment  -> greater
-- control < treatment  -> less
-- treatment > control  -> less
-- treatment < control  -> greater
-
-Covariates
-Covariate-eligible = PRE-TREATMENT columns only (variables that already
-exist before treatment assignment and cannot be influenced by the experiment,
-e.g. age, region, device, OS, tenure, traffic source, visit day/time,
-pre-test behaviour).
-
-Never use any column that is measured, updated, or derived after treatment,
-even if it is not selected as the metric. This includes outcomes, exposure
-variables, and any statistics or summaries computed from post-treatment events.
-
-Never include:
-- allocation columns
-- the selected metric
-- any other outcome/post-treatment column
-- user-excluded metrics
-- identifiers
-- free-text columns
-
-If uncertain whether a column is pre- or post-treatment, exclude it.
-
-Covariate imbalance
-You will be given covariate_imbalance: a dict mapping each covariate to its
-Standardized Mean Difference (SMD) between control and treatment groups.
-- SMD > 0.1 means the covariate is meaningfully imbalanced.
-- Do not silently drop imbalanced covariates from the episode; explicitly
-  flag them in your output/explanation, citing the actual SMD value, so
-  the user understands the comparison may be confounded.
-- Higher SMD -> stronger imbalance -> stronger caveat. Do not treat all
-  flagged covariates as equally severe.
-- If no covariate_imbalance dict is provided, or nothing exceeds 0.1,
-  don't mention imbalance at all.
-
-Categorical and numeric columns
-Classify every schema column used anywhere in the episode (allocation,
-metric, or covariate) using the schema's column_type and observed values,
-not the column name alone.
-
-cat_cols:
-- String/object dtype, boolean dtype, or a small fixed set of discrete
-  labels (e.g. "control"/"treatment", country codes, device types).
-- Numerically coded columns that represent categories (e.g. 0/1 flags,
-  group IDs) are still categorical.
-
-num_cols:
-- int/float dtype representing a continuous or countable quantity
-  (e.g. spend, impressions, clicks, age, duration).
-- Columns resolved via mixed numeric/text extraction (below) count as
-  num_cols once their numeric value is extracted.
-
-Never double-count a column in both lists. If a column's type is ambiguous
-from the schema sample, prefer categorical unless values are clearly
-continuous numeric measurements.
-
-Mixed numeric/text
-Flag columns like "10 kg" or "3 apples" for numeric extraction
-(num_col_with_str_vals).
-
-Dates
-Detect date columns and infer their formats. Date columns are excluded
-from both cat_cols and num_cols.
-
-Significance level
-- Use the user's requested significance level (alpha) if explicitly provided.
-- Otherwise set p_value = 0.05.
-
-If the schema cannot satisfy the request, omit that part instead of guessing.
-"""
-
-system_prompt2 = """You are a data analyst. You will be given the raw output of an
-                A/B test analysis tool: `test_results` (significance test, p_value,
-                statistic) and `SMD_results` (standardized mean differences checking
-                covariate balance between groups). Interpret results clearly for a
-                non-technical user: state whether the difference is statistically
-                significant, the practical implication, and caveats (sample size,
-                confidence level, etc.).\n\n
-                For SMD_results: |SMD| > 0.1 signals imbalance, a threat to validity.
-                First check if the 'covariate' is actually a metric/outcome (e.g.
-                converted, clicks) mistakenly used as a covariate — if so, note this
-                is likely a selection error on your end, not a data issue. If it's
-                a genuine pre-treatment covariate, humbly flag it to the user (e.g.
-                you may want to double check X was intended as a covariate
-                without sounding accusatory."""
+with open(ab_prompt_PATH, "r") as a_f:
+    ab_prompt = a_f.read()
+with open(rag_prompt_path, "r") as r_f:
+    rag_prompt = r_f.read()
 
 llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.4)
-llm_with_tools = llm.bind_tools([run_ab_test_analysis])
+
+class State(TypedDict):
+    messages: Annotated[list, add_messages]
+    csv_path: str | None
+    user_id: str
+
+    message_intent: NotRequired[str]
+    ab_test_result: NotRequired[str]
+    rag_result: NotRequired[str]
+
+class IntentClassifier(BaseModel):
+    message_intent: Literal["chat", "retrieve tests", "conduct test", "both"]
+
+class test_params(BaseModel):
+    episodes: list[dict]
+    Covariate_cols: list[str]
+    cat_columns: list[str]
+    num_columns: list[str]
+    date_and_formats: dict
+    num_col_with_str_vals: dict
+
+class rag_params(BaseModel):
+    query: str
+    n_results: int
+
+def classify_intent(state: State):
+    structured_lmm = llm.with_structured_output(IntentClassifier)
+    result = structured_lmm.invoke([
+        {
+            "role": "system",
+            "content": """Classify the user's message as one of: "conduct test" (run a new A/B test or comparison), "retrieve tests" (retrieve previously stored A/B test or covariate balance results), "both" (retrieve previous results and run a new test), or "chat" (general conversation, greetings, questions, or any request that does not require running or retrieving A/B tests). Return only one label."""
+        },
+        {
+            "role": "user",
+            "content": state["messages"][-1].content
+        }
+    ])
+    return {"message_intent": result.message_intent}
+
+def conduct_test(state: State):
+    if not state.get("csv_path"):
+        return {"ab_test_result": "ask the user to upload the csv"}
+
+    else:
+        schema, dataset = generate_csv_schema(csv_path=state["csv_path"])
+        formatted_ab_prompt = ab_prompt.format(schema=schema)
+        structured_llm = llm.with_structured_output(test_params)
+        trimmed = trim_messages(
+            state["messages"],
+            max_tokens=2900,
+            strategy="last",
+            token_counter=llm,
+            include_system=False,
+            start_on="human"
+        )
+        params = structured_llm.invoke(
+            [
+                {
+                    "role": "system",
+                    "content": formatted_ab_prompt
+                }
+            ]+trimmed
+        )
+        test_result = run_ab_test_analysis(
+            **params.model_dump(),
+            dataset=dataset,
+            user_id = state["user_id"]
+        )
+        return {"ab_test_result": test_result}
+
+def rag_retrieval(state: State):
+    structured_llm = llm.with_structured_output(rag_params)
+    trimmed = trim_messages(
+        state["messages"],
+        max_tokens=2900,
+        strategy="last",
+        token_counter=llm,
+        include_system=False,
+        start_on="human"
+    )
+    params = structured_llm.invoke(
+        [
+            {
+                "role": "system",
+                "content": rag_prompt
+            }
+        ]+trimmed
+    )
+    rag_result = rag_search(**params.model_dump(), user_id=state["user_id"])
+    return {"rag_result": rag_result}
+
+def both_(state: State):
+    results = {}
+    r = rag_retrieval(state)
+    c = conduct_test(state)
+    results.update(r)
+    results.update(c)
+    return results
+
+def reasoning(state: State):
+    tool_messages = []
+
+    if state.get("ab_test_result"):
+        tool_messages.append({
+            "role": "assistant",
+            "content": f"[Tool: A/B test analysis]\n{state['ab_test_result']}"
+        })
+
+    if state.get("rag_result"):
+        tool_messages.append({
+            "role": "assistant",
+            "content": f"[Tool: Historical/RAG retrieval]\n{state['rag_result']}"
+        })
+
+    system_content = """You are an A/B testing assistant. Respond naturally to general conversation, and explain any provided A/B test results, retrieved historical results, or both in clear, concise language. Interpret the statistical test, p-value, effect direction, practical significance, and any covariate balance findings. If covariates you selected are flagged as imbalanced, acknowledge that they may not be suitable for adjustment and explain why. If the imbalance comes from user-specified covariates, politely inform the user that those covariates may introduce confounding and suggest choosing more balanced pre-treatment covariates. When both current and historical results are available, compare them, highlight consistent or conflicting findings, and answer using only the provided information without inventing facts. If the user asks to save an A/B test or its results, explain that all executed tests are automatically stored in the database and can be retrieved later, so no manual save operation is required. Tool outputs will appear in the conversation as assistant messages prefixed with "[Tool: ...]". Treat these as ground-truth results to reason over, not as your own prior statements."""
+
+    trimmed = trim_messages(
+        state["messages"] + tool_messages,
+        max_tokens=2900,
+        strategy="last",
+        token_counter=llm,
+        include_system=False,
+        start_on="human"
+        )
+    response = llm.invoke(
+        [
+            {"role": "system", "content": system_content}
+        ] + trimmed
+    )
+
+    return {"messages": tool_messages + [{"role": "assistant", "content": response.content}]}
+
+graph_builder = StateGraph(State)
+
+graph_builder.add_node("classifier", classify_intent)
+graph_builder.add_node("ab_test_agent", conduct_test)
+graph_builder.add_node("rag_agent", rag_retrieval)
+graph_builder.add_node("reasoning", reasoning)
+graph_builder.add_node("both_", both_)
+
+graph_builder.add_edge(START, "classifier")
+
+graph_builder.add_conditional_edges(
+    "classifier",
+    lambda state: state["message_intent"],
+    {
+        "chat": "reasoning",
+        "conduct test": "ab_test_agent",
+        "retrieve tests": "rag_agent",
+        "both": "both_"
+    },
+)
+
+graph_builder.add_edge("ab_test_agent", "reasoning")
+graph_builder.add_edge("rag_agent", "reasoning")
+graph_builder.add_edge("both_", "reasoning")
+graph_builder.add_edge("reasoning", END)
+
+graph = graph_builder.compile(checkpointer=InMemorySaver())
+
+def ask(
+        user_id: str,
+        user_message: str,
+        thread_id: str,
+        csv_path: str|None=None
+        ):
+    config = {"configurable": {"thread_id": thread_id}}
+    result = graph.invoke(
+        {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": user_message
+                }
+           ],
+           "user_id": user_id,
+           "csv_path": csv_path
+        },
+        config=config)
+    return result["messages"][-1].content

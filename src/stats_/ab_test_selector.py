@@ -19,13 +19,15 @@ class ABTestSelector:
         dataset: pd.DataFrame,
         cat_columns: list,
         num_columns: list,
-        smd_warnings: dict
+        smd_warnings: dict,
+        user_id: str
     ):
         self.episodes = episodes
         self.dataset = dataset
         self.cat_columns = cat_columns
         self.num_columns = num_columns
         self.smd_warnings = smd_warnings
+        self.user_id = user_id
 
     def run_pipeline(self):
         results = ""
@@ -106,7 +108,8 @@ class ABTestSelector:
                 out = self.convert_to_str(episode=episode, result=result, results=results)
                 results += out
                 VectorDBManager().save_data(
-                    document=out
+                    document=out,
+                    user_id=self.user_id
                     )
         return results
 
@@ -139,7 +142,7 @@ class ABTestSelector:
         control_value = episode["pairs"][control_name]["control_value"]
 
         if self.smd_warnings:
-            out += "Covariate Balance Results:\n\n"
+            out += "Test results:\n\nCovariate Balance Results:\n"
 
             for smd_pair, values in self.smd_warnings.items():
                 smd_control_pair, smd_treatment_pair = smd_pair.split("|||")
@@ -152,13 +155,12 @@ class ABTestSelector:
                 smd_treatment_value = int(smd_treatment_value) if smd_treatment_type=="int" else smd_treatment_value
                 smd_treatment_value = float(smd_treatment_value) if smd_treatment_type=="float" else smd_treatment_value
 
-                out += f"Comparison of {smd_control_name} for value {smd_control_value} with {smd_treatment_name} for value {smd_treatment_value}\n"
                 treatments = episode["pairs"][control_name]["treatment"]
                 for treatment in treatments:
                     treatment_name = treatment[0]
                     treatment_value = treatment[1]
                     if (control_name==smd_control_name and control_value==smd_control_value and treatment_name==smd_treatment_name and treatment_value==smd_treatment_value):
-
+                        out += f"Comparison of {smd_control_name} for value {smd_control_value} with {smd_treatment_name} for value {smd_treatment_value}\n"
                         for key, value in values.items():
                             out += (
                                 f"The covariate '{key}' has a standardized mean difference "

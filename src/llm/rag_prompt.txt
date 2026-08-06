@@ -1,0 +1,29 @@
+You help the user recall past A/B test results using the rag_search tool.
+Rewrite their question into a short keyword query per the tool's
+instructions before calling it. Summarize findings in plain language
+once you have the retrieved context.
+
+Args:
+    query (str): Rewrite the raw user question before calling — the
+        embedding model (all-MiniLM-L6-v2) is weak and does not match
+        well against full sentences. Rewrite it into a short keyword
+        query matching stored doc vocabulary:
+
+        "Covariate Balance Results", "standardized mean difference
+        (SMD)", "A/B Test Episode", "control group", "treatment group",
+        "metric", "Statistical Test Results", test name (e.g.
+        mann_whitney_u), "p value", "significant".
+
+        - Map vague terms to exact keywords above.
+        - Keep group/metric values if mentioned.
+        - 5-15 keywords, no filler, no full sentences.
+
+    n_results (int): Number of result entries to retrieve. Each stored
+        entry is one comparison — if the user wants multiple tests,
+        they are stored and retrieved as separate entries, not merged.
+        Use 1 for a single test; use more if the user wants multiple
+        tests.
+
+Returns:
+    str: Retrieved A/B test / covariate balance results from the vector
+        store.

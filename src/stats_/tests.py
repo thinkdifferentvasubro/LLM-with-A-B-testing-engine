@@ -1,11 +1,12 @@
 import os
 import sys
+import pandas as pd
 from preprocessing import Preprocessor
 from ab_test_selector import ABTestSelector
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from RAG.rag_pipeline import VectorDBManager
 
+df = pd.read_csv(r"C:\projects\resume\marketing_AB.csv")
 episodes=[
     {
       "p_value": 0.05,
@@ -52,7 +53,7 @@ dataset, df_warnings = Preprocessor(
     "most ads day",
     "most ads hour"
   ],
-  csv_path=r"C:\projects\resume\marketing_AB.csv",
+  dataset=df,
   num_col_with_str_vals={},
   date_and_formats={},
   cat_cols=[
@@ -79,17 +80,9 @@ selec = ABTestSelector(
     "total ads",
     "most ads hour"
   ],
-  smd_warnings=df_warnings
+  smd_warnings=df_warnings,
+  user_id="dedfef"
 )
 
 result = selec.run_pipeline()
-
-rag_results = VectorDBManager().retrieve_data(
-    query=result
-)
-
-final_rag_result = ""
-for rag_result in rag_results["documents"]:
-  final_rag_result += rag_result[0]
-
-print(final_rag_result)
+print(result)
