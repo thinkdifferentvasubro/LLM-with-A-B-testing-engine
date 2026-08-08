@@ -3,9 +3,9 @@ import os
 import pandas as pd
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from stats_.preprocessing import Preprocessor
-from stats_.ab_test_selector import ABTestSelector
-from RAG.rag_pipeline import VectorDBManager
+from src.stats_.preprocessing import Preprocessor
+from src.stats_.ab_test_selector import ABTestSelector
+from src.RAG.rag_pipeline import VectorDBManager
 
 def run_ab_test_analysis(
     episodes: list[dict],
@@ -69,7 +69,6 @@ def generate_csv_schema(csv_path: str, sample_size: int = 10, random_state: int 
             lines.append(f"  Sample values ({sample_size} of {total_unique_vals}): {sample_values}")
 
     return "\n".join(lines), df
-
 
 def rag_search(query: str, n_results: int, user_id: str) -> str:
 

@@ -9,7 +9,7 @@ import os
 import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from RAG.rag_pipeline import VectorDBManager
+from src.RAG.rag_pipeline import VectorDBManager
 
 
 class ABTestSelector:
@@ -32,6 +32,8 @@ class ABTestSelector:
     def run_pipeline(self):
         results = ""
         for episode in self.episodes:
+            if not episode:
+                result = "could not find proper schema"
             df = self.dataset.copy()
             mask, allocation_columns = self.extract_mask_from_episode(episode=episode, dataset=df)
             df = df[mask]
@@ -105,7 +107,7 @@ class ABTestSelector:
                     )
 
             if not isinstance(result, str):
-                out = self.convert_to_str(episode=episode, result=result, results=results)
+                out = self.convert_to_str(episode=episode, result=result)
                 results += out
                 VectorDBManager().save_data(
                     document=out,
@@ -136,7 +138,7 @@ class ABTestSelector:
         stat, p = stats.shapiro(series)
         return p > alpha
 
-    def convert_to_str(self, episode: dict, result: dict, results: str):
+    def convert_to_str(self, episode: dict, result: dict):
         out = ""
         control_name = next(iter(episode["pairs"]))
         control_value = episode["pairs"][control_name]["control_value"]

@@ -1,8 +1,8 @@
-import os
+"""import os
 import sys
 import pandas as pd
 from preprocessing import Preprocessor
-from ab_test_selector import ABTestSelector
+from src.stats_.ab_test_selector import ABTestSelector
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -86,3 +86,4 @@ selec = ABTestSelector(
 
 result = selec.run_pipeline()
 print(result)
+"""

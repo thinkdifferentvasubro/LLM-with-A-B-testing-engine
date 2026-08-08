@@ -1,11 +1,13 @@
 import os
 from langchain_google_genai import ChatGoogleGenerativeAI
-from tool import run_ab_test_analysis, generate_csv_schema, rag_search
+from src.llm.tool import run_ab_test_analysis, generate_csv_schema, rag_search
 from langgraph.graph.message import add_messages
 from langgraph.graph import StateGraph, START, END
 from typing import TypedDict, Literal, Annotated, NotRequired
 from pydantic import BaseModel, Field
 from langgraph.checkpoint.memory import InMemorySaver
+from langchain_core.messages import RemoveMessage
+from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langchain_core.messages import trim_messages
 import uuid
 
@@ -46,18 +48,27 @@ class rag_params(BaseModel):
     n_results: int
 
 def classify_intent(state: State):
+    trimmed = trim_messages(
+        state["messages"],
+        max_tokens=1500,
+        strategy="last",
+        token_counter=llm,
+        include_system=False,
+        start_on="human"
+    )
+
     structured_lmm = llm.with_structured_output(IntentClassifier)
     result = structured_lmm.invoke([
         {
             "role": "system",
-            "content": """Classify the user's message as one of: "conduct test" (run a new A/B test or comparison), "retrieve tests" (retrieve previously stored A/B test or covariate balance results), "both" (retrieve previous results and run a new test), or "chat" (general conversation, greetings, questions, or any request that does not require running or retrieving A/B tests). Return only one label."""
-        },
-        {
-            "role": "user",
-            "content": state["messages"][-1].content
+            "content": """Classify the user's message as one of: "conduct test", "retrieve tests", "both", or "chat"."""
         }
-    ])
-    return {"message_intent": result.message_intent}
+    ] + trimmed)
+
+    return {
+        "message_intent": result.message_intent,
+        "messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES)] + trimmed,
+    }
 
 def conduct_test(state: State):
     if not state.get("csv_path"):
@@ -67,21 +78,13 @@ def conduct_test(state: State):
         schema, dataset = generate_csv_schema(csv_path=state["csv_path"])
         formatted_ab_prompt = ab_prompt.format(schema=schema)
         structured_llm = llm.with_structured_output(test_params)
-        trimmed = trim_messages(
-            state["messages"],
-            max_tokens=2900,
-            strategy="last",
-            token_counter=llm,
-            include_system=False,
-            start_on="human"
-        )
         params = structured_llm.invoke(
             [
                 {
                     "role": "system",
                     "content": formatted_ab_prompt
                 }
-            ]+trimmed
+            ]+state["messages"]
         )
         test_result = run_ab_test_analysis(
             **params.model_dump(),
@@ -92,21 +95,13 @@ def conduct_test(state: State):
 
 def rag_retrieval(state: State):
     structured_llm = llm.with_structured_output(rag_params)
-    trimmed = trim_messages(
-        state["messages"],
-        max_tokens=2900,
-        strategy="last",
-        token_counter=llm,
-        include_system=False,
-        start_on="human"
-    )
     params = structured_llm.invoke(
         [
             {
                 "role": "system",
                 "content": rag_prompt
             }
-        ]+trimmed
+        ]+state["messages"]
     )
     rag_result = rag_search(**params.model_dump(), user_id=state["user_id"])
     return {"rag_result": rag_result}
@@ -135,19 +130,10 @@ def reasoning(state: State):
         })
 
     system_content = """You are an A/B testing assistant. Respond naturally to general conversation, and explain any provided A/B test results, retrieved historical results, or both in clear, concise language. Interpret the statistical test, p-value, effect direction, practical significance, and any covariate balance findings. If covariates you selected are flagged as imbalanced, acknowledge that they may not be suitable for adjustment and explain why. If the imbalance comes from user-specified covariates, politely inform the user that those covariates may introduce confounding and suggest choosing more balanced pre-treatment covariates. When both current and historical results are available, compare them, highlight consistent or conflicting findings, and answer using only the provided information without inventing facts. If the user asks to save an A/B test or its results, explain that all executed tests are automatically stored in the database and can be retrieved later, so no manual save operation is required. Tool outputs will appear in the conversation as assistant messages prefixed with "[Tool: ...]". Treat these as ground-truth results to reason over, not as your own prior statements."""
-
-    trimmed = trim_messages(
-        state["messages"] + tool_messages,
-        max_tokens=2900,
-        strategy="last",
-        token_counter=llm,
-        include_system=False,
-        start_on="human"
-        )
     response = llm.invoke(
         [
             {"role": "system", "content": system_content}
-        ] + trimmed
+        ] + state["messages"]
     )
 
     return {"messages": tool_messages + [{"role": "assistant", "content": response.content}]}
