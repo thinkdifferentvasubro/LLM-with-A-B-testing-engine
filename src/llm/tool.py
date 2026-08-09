@@ -42,6 +42,8 @@ def run_ab_test_analysis(
 
 def generate_csv_schema(csv_path: str, sample_size: int = 10, random_state: int = 42) -> str:
     df = pd.read_csv(csv_path)
+    if df.empty:
+        return "dataset that user has provided is empty", None
     total_rows = df.shape[0]
 
     lines = []

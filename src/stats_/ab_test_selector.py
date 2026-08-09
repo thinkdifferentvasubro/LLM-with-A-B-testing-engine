@@ -143,7 +143,7 @@ class ABTestSelector:
         control_name = next(iter(episode["pairs"]))
         control_value = episode["pairs"][control_name]["control_value"]
 
-        if self.smd_warnings:
+        if type(self.smd_warnings).__name__ != "str":
             out += "Test results:\n\nCovariate Balance Results:\n"
 
             for smd_pair, values in self.smd_warnings.items():
@@ -170,6 +170,8 @@ class ABTestSelector:
                             )
 
                     out += "\n"
+            else:
+                out += self.smd_warnings + "\n"
 
         out += "A/B Test Episode:\n\n"
 

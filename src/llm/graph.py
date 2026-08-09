@@ -3,23 +3,28 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from src.llm.tool import run_ab_test_analysis, generate_csv_schema, rag_search
 from langgraph.graph.message import add_messages
 from langgraph.graph import StateGraph, START, END
-from typing import TypedDict, Literal, Annotated, NotRequired
+from typing import TypedDict, Literal, Annotated, NotRequired, Union, Literal
 from pydantic import BaseModel, Field
 from langgraph.checkpoint.memory import InMemorySaver
 from langchain_core.messages import RemoveMessage
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langchain_core.messages import trim_messages
-import uuid
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+intent_prompt_PATH = os.path.join(BASE_DIR, "intent_prompt.txt")
 ab_prompt_PATH = os.path.join(BASE_DIR, "a-b_prompt.txt")
 rag_prompt_path = os.path.join(BASE_DIR, "rag_prompt.txt")
+reasoning_prompt_PATH = os.path.join(BASE_DIR, "reasoning_prompt.txt")
 
 with open(ab_prompt_PATH, "r") as a_f:
     ab_prompt = a_f.read()
 with open(rag_prompt_path, "r") as r_f:
     rag_prompt = r_f.read()
+with open(intent_prompt_PATH, "r") as i_f:
+    intent_prompt = i_f.read()
+with open(reasoning_prompt_PATH, "r") as re_f:
+    reasoning_prompt = re_f.read()
 
 llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.4)
 
@@ -35,13 +40,34 @@ class State(TypedDict):
 class IntentClassifier(BaseModel):
     message_intent: Literal["chat", "retrieve tests", "conduct test", "both"]
 
+Scalar = Union[bool, int, float, str]
+
+class PairSpec(BaseModel):
+    control_value: Scalar
+    treatment: list[list[Scalar]] = Field(
+        description='List of [column, value] pairs, e.g. [["test group", "ad"]]. '
+                    'Multiple pairs allowed, e.g. [["test group", "ad"], ["region", "west"]]'
+    )
+
+
+class Episode(BaseModel):
+    pairs: dict[str, PairSpec]
+    metrics: list[str]
+    p_value: float = 0.05
+    test: Literal[
+        "", "ttest", "welchttest", "mannwhitneyu", "anova",
+        "kruskalwallis", "fisherexact", "ztest", "chisquare",
+        "manova", "gtest"
+    ] = ""
+    tail: Literal["", "greater", "less"] = ""
+
 class test_params(BaseModel):
-    episodes: list[dict]
+    episodes: list[Episode]
     Covariate_cols: list[str]
     cat_cols: list[str]
     num_cols: list[str]
-    date_and_formats: dict
-    num_col_with_str_vals: dict
+    date_and_formats: dict[str, str]
+    num_col_with_str_vals: dict[str, str]
 
 class rag_params(BaseModel):
     query: str
@@ -52,7 +78,7 @@ def classify_intent(state: State):
         state["messages"],
         max_tokens=1500,
         strategy="last",
-        token_counter=llm,
+        token_counter="approximate",
         include_system=False,
         start_on="human"
     )
@@ -61,10 +87,10 @@ def classify_intent(state: State):
     result = structured_lmm.invoke([
         {
             "role": "system",
-            "content": """Classify the user's message as one of: "conduct test", "retrieve tests", "both", or "chat"."""
+            "content": intent_prompt
         }
     ] + trimmed)
-
+    print("intent")
     return {
         "message_intent": result.message_intent,
         "messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES)] + trimmed,
@@ -72,10 +98,13 @@ def classify_intent(state: State):
 
 def conduct_test(state: State):
     if not state.get("csv_path"):
-        return {"ab_test_result": "ask the user to upload the csv"}
+        print("no csv test")
+        return {"ab_test_result": "The user did not upload his csv file ask him to upload the file for the test"}
 
     else:
         schema, dataset = generate_csv_schema(csv_path=state["csv_path"])
+        if dataset is None:
+            return {"ab_test_result": schema}
         formatted_ab_prompt = ab_prompt.format(schema=schema)
         structured_llm = llm.with_structured_output(test_params)
         params = structured_llm.invoke(
@@ -86,11 +115,13 @@ def conduct_test(state: State):
                 }
             ]+state["messages"]
         )
+        print(params)
         test_result = run_ab_test_analysis(
             **params.model_dump(),
             dataset=dataset,
             user_id = state["user_id"]
         )
+        print("test")
         return {"ab_test_result": test_result}
 
 def rag_retrieval(state: State):
@@ -104,6 +135,7 @@ def rag_retrieval(state: State):
         ]+state["messages"]
     )
     rag_result = rag_search(**params.model_dump(), user_id=state["user_id"])
+    print("rag")
     return {"rag_result": rag_result}
 
 def both_(state: State):
@@ -112,6 +144,7 @@ def both_(state: State):
     c = conduct_test(state)
     results.update(r)
     results.update(c)
+    print("both")
     return results
 
 def reasoning(state: State):
@@ -129,12 +162,13 @@ def reasoning(state: State):
             "content": f"[Tool: Historical/RAG retrieval]\n{state['rag_result']}"
         })
 
-    system_content = """You are an A/B testing assistant. Respond naturally to general conversation, and explain any provided A/B test results, retrieved historical results, or both in clear, concise language. Interpret the statistical test, p-value, effect direction, practical significance, and any covariate balance findings. If covariates you selected are flagged as imbalanced, acknowledge that they may not be suitable for adjustment and explain why. If the imbalance comes from user-specified covariates, politely inform the user that those covariates may introduce confounding and suggest choosing more balanced pre-treatment covariates. When both current and historical results are available, compare them, highlight consistent or conflicting findings, and answer using only the provided information without inventing facts. If the user asks to save an A/B test or its results, explain that all executed tests are automatically stored in the database and can be retrieved later, so no manual save operation is required. Tool outputs will appear in the conversation as assistant messages prefixed with "[Tool: ...]". Treat these as ground-truth results to reason over, not as your own prior statements."""
+    system_content = reasoning_prompt
     response = llm.invoke(
         [
             {"role": "system", "content": system_content}
-        ] + state["messages"]
+        ] + state["messages"] + tool_messages
     )
+    print("reasoning")
 
     return {"messages": tool_messages + [{"role": "assistant", "content": response.content}]}
 

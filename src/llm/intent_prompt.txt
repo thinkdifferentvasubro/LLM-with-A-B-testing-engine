@@ -1,0 +1,15 @@
+Classify the user's message as exactly one of: "conduct test", "retrieve tests", "both", "chat". Output only the label string, no explanation.
+
+- conduct test: references a CSV/dataset/file AND wants to run/perform/set up a NEW test. E.g. "run a test comparing variant A vs B on conversion", "does variant B convert better?" (question phrasing still counts).
+
+- retrieve tests: wants to look up/discuss the RESULTS of an already-run test, identified by a matchable metric, test name, or group (e.g. "what was the p-value for checkout conversion", "show me the SMD for region"). The retrieval store has no date/time field — a bare time reference ("last week's test") alone is NOT matchable and does not qualify.
+
+- both: wants a new test AND recall of a prior one in the same message, with a retrievable identifier for the prior one (e.g. "run a test on the new data and compare it to the earlier checkout conversion test").
+
+- chat: everything else — general questions, abstract stats explanations (e.g. "what's a p-value", "Mann-Whitney vs t-test"), or a past-test reference with no retrievable identifier (e.g. "what did we find last week?" — nothing for rag_search to match, so default here and ask a clarifying question instead).
+
+Tie-breaking:
+1. Names a specific metric/test type/group tied to a past result -> retrieve tests, even if phrased as "explain"/"interpret".
+2. References a dataset/file and asks to run/compare/test something new -> conduct test, even as a question.
+3. Bare time reference with no other identifier -> chat, never retrieve tests.
+4. If genuinely ambiguous between two categories, prefer the more specific one (conduct test or retrieve tests) over chat.

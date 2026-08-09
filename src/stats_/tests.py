@@ -1,10 +1,9 @@
-"""import os
+import os
 import sys
 import pandas as pd
 from preprocessing import Preprocessor
-from src.stats_.ab_test_selector import ABTestSelector
+from ab_test_selector import ABTestSelector
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 df = pd.read_csv(r"C:\projects\resume\marketing_AB.csv")
 episodes=[
@@ -86,4 +85,3 @@ selec = ABTestSelector(
 
 result = selec.run_pipeline()
 print(result)
-"""

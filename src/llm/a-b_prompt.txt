@@ -31,24 +31,25 @@ Args:
         Normally one allocation column per episode unless the user
         explicitly compares multiple. For multi-group tests (anova,
         kruskalwallis, manova), choose a sensible reference group if none
-        is specified — pick one group as control and treat the rest as
-        treatment.
+        is specified — pick one group as control and treat the rest as treatment.
 
         pairs (dict):
             {{
                 column: {{
-                    "control_value": str,
+                    "control_value": bool | int | float | str,
                     "treatment": [[column, value], ...]
                 }}
             }}
             Exactly one control per episode per allocation column
-            ("control_value" is always a single str, never a list) — like
-            a real A/B test, one baseline arm. "treatment" may hold
-            multiple entries — one control vs. many treatments is valid
-            and expected for multi-arm tests (anova, kruskalwallis,
-            manova). Never put two groups as control within one pairs
-            entry; if two groups both need to act as baseline, split into
-            separate episodes instead.
+            ("control_value" is always a single value, never a list).
+            The control_value and treatment values must use the data type
+            represented in the dataset schema: bool, int, float, or str.
+            Never convert a value to a string when the schema represents it
+            as bool, int, or float. "treatment" may hold multiple entries —
+            one control vs. many treatments is valid and expected for
+            multi-arm tests (anova, kruskalwallis, manova). Never put two
+            groups as control within one pairs entry; if two groups both
+            need to act as baseline, split them into separate episodes.
 
         metrics (list[str]): One metric per episode unless the user
             explicitly requests multiple. If one outcome metric is
@@ -111,12 +112,11 @@ Args:
     num_cols (list[str]): int/float dtype representing a continuous or
         countable quantity (e.g. spend, impressions, clicks, age,
         duration). Columns resolved via mixed numeric/text extraction
-        stay in num_col_with_str_vals, not here, even once their numeric
-        value is known. Exclude any column already listed in
-        date_and_formats. Never double-count a column in both cat_cols
-        and num_cols — if a column's type is ambiguous from the schema
-        sample, prefer categorical unless values are clearly continuous
-        numeric measurements.
+        stay in num_col_with_str_vals and here in num cols also
+        . Exclude any column already listed in date_and_formats. 
+        Never double-count a column in both cat_cols and num_cols — 
+        if a column's type is ambiguous from the schemasample, prefer 
+        categorical unless values are clearly continuous numeric measurements.
 
 Returns:
-    Statistical test results for each episode, as a string.
+    return the output in the same structure specified above
