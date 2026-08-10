@@ -170,8 +170,8 @@ class ABTestSelector:
                             )
 
                     out += "\n"
-            else:
-                out += self.smd_warnings + "\n"
+        else:
+            out += self.smd_warnings + "\n"
 
         out += "A/B Test Episode:\n\n"
 

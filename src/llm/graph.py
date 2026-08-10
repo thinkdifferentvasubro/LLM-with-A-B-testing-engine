@@ -26,7 +26,7 @@ with open(intent_prompt_PATH, "r") as i_f:
 with open(reasoning_prompt_PATH, "r") as re_f:
     reasoning_prompt = re_f.read()
 
-llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.4)
+llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.4, max_retries=1)
 
 class State(TypedDict):
     messages: Annotated[list, add_messages]
@@ -82,14 +82,19 @@ def classify_intent(state: State):
         include_system=False,
         start_on="human"
     )
+    if not state.get("csv_path"):
+        content = "the csv is not uploaded by the user"
+    else:
+        content = "the data csv is uploaded by the user"
 
+    csv_message = [{"role": "assistant", "content": content}]
     structured_lmm = llm.with_structured_output(IntentClassifier)
     result = structured_lmm.invoke([
         {
             "role": "system",
             "content": intent_prompt
         }
-    ] + trimmed)
+    ] + csv_message + trimmed)
     print("intent")
     return {
         "message_intent": result.message_intent,

@@ -12,6 +12,7 @@ import gradio as gr
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
+import pandas as pd
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from src.llm.graph import ask
@@ -184,34 +185,65 @@ with gr.Blocks(title="A/B Test Assistant") as demo:
     thread_id_state = gr.State(None)
     csv_path_state = gr.State(None)
 
-    with gr.Row():
-        username_box = gr.Textbox(label="Username", placeholder="e.g. jane.doe", scale=2)
-        password_box = gr.Textbox(label="Password", type="password", scale=2)
-        login_btn = gr.Button("Login / Sign up", scale=1)
-    login_status = gr.Markdown("Not logged in.")
+    with gr.Group():
+        with gr.Row():
+            username_box = gr.Textbox(label="Username", placeholder="e.g. jane.doe", scale=2)
+            password_box = gr.Textbox(label="Password", type="password", scale=2)
+            login_btn = gr.Button("Login / Sign up", scale=1, variant="primary")
+        login_status = gr.Markdown("🔒 Not logged in.")
+
+    with gr.Group(visible=False) as upload_group:
+        with gr.Row():
+            csv_file = gr.File(label="Upload CSV for A/B testing", file_types=[".csv"])
+        upload_status = gr.Markdown("")
+        csv_preview = gr.Dataframe(label="Preview", visible=False, interactive=False)
+
+    with gr.Group(visible=False) as chat_group:
+        chat_ui = gr.ChatInterface(
+            fn=chat,
+            additional_inputs=[user_id_state, thread_id_state, csv_path_state],
+            type="messages",
+            title=None,
+            description="Ask questions, run A/B tests on your uploaded CSV, or retrieve past results.",
+        )
+
+    def handle_login(username, password):
+        user_id, thread_id, status = do_login(username, password)
+        ok = user_id is not None
+        status_msg = f"✅ {status}" if ok else f"❌ {status}"
+        return (
+            user_id,
+            thread_id,
+            status_msg,
+            gr.update(visible=ok),
+            gr.update(visible=ok),
+        )
 
     login_btn.click(
-        fn=do_login,
+        fn=handle_login,
         inputs=[username_box, password_box],
-        outputs=[user_id_state, thread_id_state, login_status],
+        outputs=[user_id_state, thread_id_state, login_status, upload_group, chat_group],
+    )
+    password_box.submit(
+        fn=handle_login,
+        inputs=[username_box, password_box],
+        outputs=[user_id_state, thread_id_state, login_status, upload_group, chat_group],
     )
 
-    with gr.Row():
-        csv_file = gr.File(label="Upload CSV for A/B testing", file_types=[".csv"])
-    upload_status = gr.Markdown("")
+    def handle_upload(file, user_id):
+        if file is None:
+            return None, "No file uploaded.", gr.update(visible=False)
+        try:
+            path, status = upload_csv(file, user_id)
+            df_preview = pd.read_csv(path).head(10)
+            return path, f"✅ {status}", gr.update(value=df_preview, visible=True)
+        except Exception as e:
+            return None, f"❌ Failed to process CSV: {e}", gr.update(visible=False)
 
     csv_file.upload(
-        fn=upload_csv,
+        fn=handle_upload,
         inputs=[csv_file, user_id_state],
-        outputs=[csv_path_state, upload_status],
-    )
-
-    gr.ChatInterface(
-        fn=chat,
-        additional_inputs=[user_id_state, thread_id_state, csv_path_state],
-        type="messages",
-        title=None,
-        description="Ask questions, run A/B tests on your uploaded CSV, or retrieve past results.",
+        outputs=[csv_path_state, upload_status, csv_preview],
     )
 
 app = gr.mount_gradio_app(app, demo, path="/ui")
