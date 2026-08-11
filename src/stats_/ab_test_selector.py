@@ -132,12 +132,6 @@ class ABTestSelector:
 
         return mask, list(allocation_columns)
     
-    def is_normal(self, series: pd.Series, alpha=0.05):
-        if len(series) < 3:
-            return False
-        stat, p = stats.shapiro(series)
-        return p > alpha
-
     def convert_to_str(self, episode: dict, result: dict):
         out = ""
         control_name = next(iter(episode["pairs"]))
@@ -275,124 +269,225 @@ class ABTestSelector:
             "tail": tail,
             "significant": bool(p_value_fisher < alpha),
         }
-        
-    def two_tailed_numeric_test(self, df: pd.DataFrame, allocation_col: list, metric_col: str, alpha=0.05):
+
+    def evaluate_properties(self, series: pd.Series, alpha: float = 0.05) -> dict:
+            
+            clean = series
+            n = len(clean)
+    
+            result = {
+                "n": n,
+                "skewness": None,
+                "skew_label": None,
+                "normal": False,
+                "p_normal": None,
+                "n_outliers": 0,
+                "has_outliers": False,
+                "outlier_index": [],
+            }
+    
+            if n < 3:
+                return result
+    
+            if n <= 5000:
+                stat, p = stats.shapiro(clean)
+            else:
+                stat, p = stats.normaltest(clean)
+            result["p_normal"] = float(p)
+            result["normal"] = p > alpha
+    
+            # --- Skewness ----------------------------------------------------
+            skew = float(stats.skew(clean))
+            result["skewness"] = skew
+            if abs(skew) < 0.5:
+                result["skew_label"] = "approximately symmetric"
+            elif abs(skew) < 1:
+                result["skew_label"] = "moderately skewed"
+            else:
+                result["skew_label"] = "highly skewed"
+    
+            q1, q3 = np.percentile(clean, [25, 75])
+            iqr = q3 - q1
+            lower, upper = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+            mask = (clean < lower) | (clean > upper)
+            result["n_outliers"] = int(mask.sum())
+            result["has_outliers"] = result["n_outliers"] > 0
+    
+            return result
+    
+    def evaluate_groups(self, grouped: list, alpha: float = 0.05) -> dict:
+    
+        properties = [self.evaluate_properties(g, alpha=alpha) for g in grouped]
+
+        levene_stat, levene_p, equal_var = None, None, False
+        if all(p["n"] >= 3 for p in properties):
+            levene_stat, levene_p = stats.levene(*grouped, center="median")
+            equal_var = levene_p > alpha
+
+        return {
+            "group_properties": properties,
+            "all_normal": all(p["normal"] for p in properties),
+            "any_outliers": any(p["has_outliers"] for p in properties),
+            "min_sample_size": min((p["n"] for p in properties), default=0),
+            "levene_stat": float(levene_stat) if levene_stat is not None else None,
+            "levene_p": float(levene_p) if levene_p is not None else None,
+            "equal_var": equal_var,
+        }
+    
+    def two_tailed_numeric_test(
+        self,
+        df: pd.DataFrame,
+        allocation_col: list,
+        metric_col: str,
+        alpha: float = 0.05,
+        outlier_forces_nonparametric: bool = True,
+        min_n_for_parametric: int = 8,
+    ):
         sub = df[allocation_col + [metric_col]]
-
-        grouped = [
-            group[metric_col]
-            for _, group in sub.groupby(allocation_col)
-        ]
-
+        grouped = [group[metric_col] for _, group in sub.groupby(allocation_col)]
         n_groups = len(grouped)
 
         if n_groups < 2:
             return f"Need >=2 groups; got {n_groups}."
 
-        normal = all(self.is_normal(series) for series in grouped)
+        diag = self.evaluate_groups(grouped, alpha=alpha)
+
+        use_parametric = (
+            diag["all_normal"]
+            and diag["min_sample_size"] >= min_n_for_parametric
+            and not (outlier_forces_nonparametric and diag["any_outliers"])
+        )
+
+        base_result = {"diagnostics": diag}
 
         if n_groups == 2:
-            
-            if normal:
+            if use_parametric:
                 statistic, p_value = stats.ttest_ind(
                     grouped[0],
                     grouped[1],
-                    equal_var=False,
-                    alternative="two-sided"
+                    equal_var=diag["equal_var"],
+                    alternative="two-sided",
                 )
-
+                test_name = "student_t_test" if diag["equal_var"] else "welch_t_test"
                 return {
-                    "test": "welch_t_test",
+                    **base_result,
+                    "test": test_name,
                     "statistic": float(statistic),
                     "p_value": float(p_value),
                     "significant": bool(p_value < alpha),
                 }
 
             statistic, p_value = stats.mannwhitneyu(
-                grouped[0],
-                grouped[1],
-                alternative="two-sided"
+                grouped[0], grouped[1], alternative="two-sided"
             )
-
             return {
+                **base_result,
                 "test": "mann_whitney_u",
                 "statistic": float(statistic),
                 "p_value": float(p_value),
                 "significant": bool(p_value < alpha),
             }
 
-        if normal:
-            statistic, p_value = stats.f_oneway(*grouped)
+        if use_parametric:
+            if diag["equal_var"]:
+                statistic, p_value = stats.f_oneway(*grouped)
+                return {
+                    **base_result,
+                    "test": "one_way_anova",
+                    "statistic": float(statistic),
+                    "p_value": float(p_value),
+                    "significant": bool(p_value < alpha),
+                }
 
+            res = stats.alexandergovern(*grouped)
             return {
-                "test": "one_way_anova",
-                "statistic": float(statistic),
-                "p_value": float(p_value),
-                "significant": bool(p_value < alpha),
+                **base_result,
+                "test": "alexander_govern_welch_anova",
+                "statistic": float(res.statistic),
+                "p_value": float(res.pvalue),
+                "significant": bool(res.pvalue < alpha),
             }
 
         statistic, p_value = stats.kruskal(*grouped)
-
         return {
+            **base_result,
             "test": "kruskal_wallis",
             "statistic": float(statistic),
             "p_value": float(p_value),
             "significant": bool(p_value < alpha),
         }
 
-    def one_tailed_numeric_test(self, df: pd.DataFrame, allocation_col: list, metric_col: str, episode: dict, alpha=0.05):
+    def one_tailed_numeric_test(
+        self,
+        df: pd.DataFrame,
+        allocation_col: list,
+        metric_col: str,
+        episode: dict,
+        alpha: float = 0.05,
+        outlier_forces_nonparametric: bool = True,
+        min_n_for_parametric: int = 8,
+    ):
         df = df[allocation_col + [metric_col]]
         control_col = list(episode["pairs"].keys())[0]
         control_value = episode["pairs"][control_col]["control_value"]
         treatment_col, treatment_value = episode["pairs"][control_col]["treatment"][0]
         tail = episode["tail"]
-
+ 
         control_mask = df[control_col] == control_value
         treatment_mask = df[treatment_col] == treatment_value
-
+ 
         sub = df[control_mask | treatment_mask][[control_col, treatment_col, metric_col]].copy()
         sub["group"] = None
         sub.loc[control_mask[control_mask | treatment_mask], "group"] = "control"
         sub.loc[treatment_mask[control_mask | treatment_mask], "group"] = "treatment"
-
+ 
         group1 = sub[sub["group"] == "control"][metric_col]
         group2 = sub[sub["group"] == "treatment"][metric_col]
-        
+ 
         if group1.empty or group2.empty:
             return "control and treatment groups must both be non-empty for one tailed test"
-
-        group1_norm = self.is_normal(group1)
-        group2_norm = self.is_normal(group2)
-
-
-        if group1_norm and group2_norm:
+ 
+        diag = self.evaluate_groups([group1, group2], alpha=alpha)
+ 
+        use_parametric = (
+            diag["all_normal"]
+            and diag["min_sample_size"] >= min_n_for_parametric
+            and not (outlier_forces_nonparametric and diag["any_outliers"])
+        )
+ 
+        base_result = {"diagnostics": diag}
+ 
+        if use_parametric:
             statistic, p_value = stats.ttest_ind(
                 group1,
                 group2,
                 alternative=tail,
-                equal_var=False
+                equal_var=diag["equal_var"],
             )
-
+            test_name = "student_t_test" if diag["equal_var"] else "welch_t_test"
+ 
             return {
-                "test": "welch_t_test",
+                **base_result,
+                "test": test_name,
                 "statistic": float(statistic),
                 "p_value": float(p_value),
-                "significant": bool(p_value < alpha)
+                "significant": bool(p_value < alpha),
             }
-
+ 
         statistic, p_value = stats.mannwhitneyu(
             group1,
             group2,
             alternative=tail
         )
-
+ 
         return {
+            **base_result,
             "test": "mann_whitney_u",
             "statistic": float(statistic),
             "p_value": float(p_value),
-            "significant": bool(p_value < alpha)
+            "significant": bool(p_value < alpha),
         }
-
+    
     def mannova_test(self, df: pd.DataFrame, allocation_col: list, metric_col: list, alpha=0.05):
         
         sub = df[allocation_col + metric_col]
@@ -511,6 +606,7 @@ class ABTestSelector:
             "joint_categories": int(n_categories),
             "metrics": metric_col,
         }
+
     def run_selected_test(
     self,
     test_name: str,
@@ -527,14 +623,12 @@ class ABTestSelector:
         if n_groups < 2:
             return "there should be at least two groups for the test"
 
-        if test_name in ("ttest", "welchttest", "mannwhitneyu", "anova", "kruskalwallis", "fisherexact", "ztest", "chisquare") and len(metric_col) > 1:
+        if test_name in ("ttest", "welchttest", "mannwhitneyu", "anova", "welchanova", "kruskalwallis", "fisherexact", "ztest", "chisquare") and len(metric_col) > 1:
             return f"'{test_name}' only supports a single metric column; got {len(metric_col)}."
 
-        # these tests have no directional variant - tail isn't valid for them
-        if test_name in ("chisquare", "anova", "kruskalwallis", "manova", "gtest") and tail:
+        if test_name in ("chisquare", "anova", "welchanova", "kruskalwallis", "manova", "gtest") and tail:
             return f"'{test_name}' does not support a one-tailed test; only two-sided is available for it."
-            
-
+        
         if test_name in ("fisherexact", "ztest"):
             n_categories = sub[metric_col[0]].nunique()
             if n_categories != 2:
@@ -544,7 +638,36 @@ class ABTestSelector:
             n_categories = sub[metric_col[0]].nunique()
             if n_categories < 2:
                 return f"'chisquare' requires at least 2 categories in '{metric_col[0]}'; got {n_categories}."
-            
+
+        def _build_warnings(diag, group_labels=("group 1", "group 2")):
+            warnings = []
+            if not diag["all_normal"]:
+                offenders = [
+                    group_labels[i] if i < len(group_labels) else f"group {i+1}"
+                    for i, p in enumerate(diag["group_properties"])
+                    if not p["normal"]
+                ]
+                warnings.append(
+                    "Normality assumption looks violated (Shapiro-Wilk/D'Agostino) in "
+                    f"{', '.join(offenders)}; consider a nonparametric alternative."
+                )
+            if diag["any_outliers"]:
+                counts = [p["n_outliers"] for p in diag["group_properties"]]
+                warnings.append(
+                    f"Outliers detected (IQR rule), counts per group: {counts}; "
+                    "these can distort parametric test results."
+                )
+            if diag["levene_p"] is not None and not diag["equal_var"]:
+                warnings.append(
+                    f"Levene's test suggests unequal variances (p={diag['levene_p']:.4f}); "
+                    "a Welch-corrected test is more appropriate than the pooled-variance version."
+                )
+            if diag["min_sample_size"] < 8:
+                warnings.append(
+                    f"Smallest group has only {diag['min_sample_size']} observations; "
+                    "normality/variance diagnostics are unreliable at this sample size."
+                )
+            return warnings
 
         try:
             if test_name in ("ttest", "welchttest"):
@@ -554,41 +677,56 @@ class ABTestSelector:
                     treatment_col, treatment_value = episode["pairs"][control_col]["treatment"][0]
                     metric_col = episode["metrics"][0]
                     tail = episode["tail"]
-            
+
                     control_mask = df[control_col] == control_value
                     treatment_mask = df[treatment_col] == treatment_value
-            
+
                     sub = df[control_mask | treatment_mask][[control_col, treatment_col, metric_col]].copy()
                     sub["group"] = None
-                    sub.loc[control_mask[control_mask | treatment_mask], "group"] = "control"
-                    sub.loc[treatment_mask[control_mask | treatment_mask], "group"] = "treatment"
-            
+                    sub.loc[control_mask, "group"] = "control"
+                    sub.loc[treatment_mask, "group"] = "treatment"
+
                     group1 = sub[sub["group"] == "control"][metric_col]
                     group2 = sub[sub["group"] == "treatment"][metric_col]
-            
+
                     if group1.empty or group2.empty:
-                        return "control and treatment groups must both be non-empty for one tailed test" 
+                        return "control and treatment groups must both be non-empty for one tailed test"
+
+                    labels = ("control", "treatment")
                 else:
                     grouped = [g[metric_col[0]] for _, g in sub.groupby(allocation_col)]
                     group1, group2 = grouped[0], grouped[1]
                     tail = "two-sided"
+                    labels = ("group 1", "group 2")
 
-                normal = self.is_normal(group1) and self.is_normal(group2)
+                diag = self.evaluate_groups([group1, group2], alpha=alpha)
+
+                if test_name == "welchttest":
+                    equal_var = False
+                elif test_name == "ttest":
+                    equal_var = True
+                else:
+                    equal_var = diag["equal_var"]
+
                 statistic, p_value = stats.ttest_ind(
-                    group1, group2, equal_var=False, alternative=tail
+                    group1, group2, equal_var=equal_var, alternative=tail
                 )
                 result = {
-                    "test": "welch_t_test",
+                    "test": "student_t_test" if equal_var else "welch_t_test",
                     "conducted": True,
                     "statistic": float(statistic),
                     "p_value": float(p_value),
                     "significant": bool(p_value < alpha),
+                    "diagnostics": diag,
                 }
-                if not normal:
-                    result["warning"] = (
-                        "Normality assumption looks violated (Shapiro-Wilk); "
-                        "consider 'mannwhitneyu' instead."
+                warnings = _build_warnings(diag, labels)
+                if test_name == "ttest" and not diag["equal_var"]:
+                    warnings.append(
+                        "You requested 'ttest' (equal variances assumed) but Levene's test "
+                        "indicates unequal variances; results may be biased — consider 'welchttest'."
                     )
+                if warnings:
+                    result["warning"] = " ".join(warnings)
                 return result
 
             elif test_name == "mannwhitneyu":
@@ -598,37 +736,48 @@ class ABTestSelector:
                     treatment_col, treatment_value = episode["pairs"][control_col]["treatment"][0]
                     metric_col = episode["metrics"][0]
                     tail = episode["tail"]
-            
+
                     control_mask = df[control_col] == control_value
                     treatment_mask = df[treatment_col] == treatment_value
-            
+
                     sub = df[control_mask | treatment_mask][[control_col, treatment_col, metric_col]].copy()
                     sub["group"] = None
-                    sub.loc[control_mask[control_mask | treatment_mask], "group"] = "control"
-                    sub.loc[treatment_mask[control_mask | treatment_mask], "group"] = "treatment"
-            
+                    sub.loc[control_mask, "group"] = "control"
+                    sub.loc[treatment_mask, "group"] = "treatment"
+
                     group1 = sub[sub["group"] == "control"][metric_col]
                     group2 = sub[sub["group"] == "treatment"][metric_col]
-            
+
                     if group1.empty or group2.empty:
-                        return "control and treatment groups must both be non-empty for one tailed test" 
+                        return "control and treatment groups must both be non-empty for one tailed test"
+
+                    labels = ("control", "treatment")
                 else:
                     grouped = [g[metric_col[0]] for _, g in sub.groupby(allocation_col)]
                     group1, group2 = grouped[0], grouped[1]
                     tail = "two-sided"
+                    labels = ("group 1", "group 2")
 
+                diag = self.evaluate_groups([group1, group2], alpha=alpha)
                 statistic, p_value = stats.mannwhitneyu(group1, group2, alternative=tail)
-                return {
+                result = {
                     "test": "mann_whitney_u",
                     "conducted": True,
                     "statistic": float(statistic),
                     "p_value": float(p_value),
                     "significant": bool(p_value < alpha),
+                    "diagnostics": diag,
                 }
+                if diag["min_sample_size"] < 8:
+                    result["warning"] = (
+                        f"Smallest group has only {diag['min_sample_size']} observations; "
+                        "the U-statistic's normal approximation may be unreliable this small."
+                    )
+                return result
 
             elif test_name == "anova":
                 grouped = [g[metric_col[0]] for _, g in sub.groupby(allocation_col)]
-                normal = all(self.is_normal(g) for g in grouped)
+                diag = self.evaluate_groups(grouped, alpha=alpha)
                 statistic, p_value = stats.f_oneway(*grouped)
                 result = {
                     "test": "one_way_anova",
@@ -636,24 +785,62 @@ class ABTestSelector:
                     "statistic": float(statistic),
                     "p_value": float(p_value),
                     "significant": bool(p_value < alpha),
+                    "diagnostics": diag,
                 }
-                if not normal:
-                    result["warning"] = (
-                        "Normality assumption looks violated in at least one group; "
-                        "consider 'kruskalwallis' instead."
+                warnings = _build_warnings(diag, tuple(f"group {i+1}" for i in range(len(grouped))))
+                if not diag["equal_var"]:
+                    warnings.append(
+                        "One-way ANOVA assumes equal variances; consider a Welch ANOVA "
+                        "(alexandergovern) given Levene's result above."
                     )
+                if warnings:
+                    result["warning"] = " ".join(warnings)
                 return result
 
+            elif test_name == "welchanova":
+                grouped = [g[metric_col[0]] for _, g in sub.groupby(allocation_col)]
+                if len(grouped) < 3:
+                    return "'welchanova' is intended for 3+ groups; use 'ttest' or 'welchttest' for two groups."
+
+                diag = self.evaluate_groups(grouped, alpha=alpha)
+                res = stats.alexandergovern(*grouped)
+                result = {
+                    "test": "alexander_govern_welch_anova",
+                    "conducted": True,
+                    "statistic": float(res.statistic),
+                    "p_value": float(res.pvalue),
+                    "significant": bool(res.pvalue < alpha),
+                    "diagnostics": diag,
+                }
+                warnings = _build_warnings(diag, tuple(f"group {i+1}" for i in range(len(grouped))))
+                if diag["equal_var"]:
+                    warnings.append(
+                        "Levene's test does not indicate unequal variances here; "
+                        "a standard one-way ANOVA ('anova') would have similar power "
+                        "and is simpler to report."
+                    )
+                if warnings:
+                    result["warning"] = " ".join(warnings)
+                return result
+            
             elif test_name == "kruskalwallis":
                 grouped = [g[metric_col[0]] for _, g in sub.groupby(allocation_col)]
+                diag = self.evaluate_groups(grouped, alpha=alpha)
                 statistic, p_value = stats.kruskal(*grouped)
-                return {
+                result = {
                     "test": "kruskal_wallis",
                     "conducted": True,
                     "statistic": float(statistic),
                     "p_value": float(p_value),
                     "significant": bool(p_value < alpha),
+                    "diagnostics": diag,
                 }
+                if diag["min_sample_size"] < 8:
+                    result["warning"] = (
+                        f"Smallest group has only {diag['min_sample_size']} observations; "
+                        "the chi-square approximation for H may be unreliable this small."
+                    )
+                return result
 
             elif test_name == "chisquare":
                 table = pd.crosstab([sub[c] for c in allocation_col], sub[metric_col[0]])
@@ -673,23 +860,13 @@ class ABTestSelector:
                         "if this is a 2x2 table."
                     )
                 return result
-            
+
             elif test_name == "fisherexact":
-
                 if not tail:
-                    table = pd.crosstab(
-                        [sub[c] for c in allocation_col],
-                        sub[metric_col[0]]
-                    )
-
+                    table = pd.crosstab([sub[c] for c in allocation_col], sub[metric_col[0]])
                     if table.shape != (2, 2):
                         return f"'fisherexact' requires a 2x2 table; got shape {table.shape}."
-
-                    odds_ratio, p_value = stats.fisher_exact(
-                        table.values,
-                        alternative="two-sided",
-                    )
-
+                    odds_ratio, p_value = stats.fisher_exact(table.values, alternative="two-sided")
                 else:
                     control_col = list(episode["pairs"].keys())[0]
                     control_value = episode["pairs"][control_col]["control_value"]
@@ -699,36 +876,33 @@ class ABTestSelector:
                     control_mask = df[control_col] == control_value
                     treatment_mask = df[treatment_col] == treatment_value
 
-                    sub = df[control_mask | treatment_mask][
-                        [control_col, treatment_col, metric]
-                    ].copy()
-
+                    sub = df[control_mask | treatment_mask][[control_col, treatment_col, metric]].copy()
                     sub["group"] = None
-                    sub.loc[control_mask[control_mask | treatment_mask], "group"] = "control"
-                    sub.loc[treatment_mask[control_mask | treatment_mask], "group"] = "treatment"
+                    sub.loc[control_mask, "group"] = "control"
+                    sub.loc[treatment_mask, "group"] = "treatment"
 
                     table = pd.crosstab(sub["group"], sub[metric])
-
                     if table.shape != (2, 2):
                         return f"'fisherexact' requires a 2x2 table; got shape {table.shape}."
-
                     table = table.loc[["control", "treatment"]]
+                    odds_ratio, p_value = stats.fisher_exact(table.values, alternative=tail)
 
-                    odds_ratio, p_value = stats.fisher_exact(
-                        table.values,
-                        alternative=tail,
-                    )
-
-                return {
+                result = {
                     "test": "fisher_exact",
                     "conducted": True,
                     "statistic": float(odds_ratio),
                     "p_value": float(p_value),
                     "significant": bool(p_value < alpha),
                 }
+                if (table.values < 5).any():
+                    result["warning"] = (
+                        "Some cell counts are below 5; Fisher's exact test is still valid "
+                        "here (that's exactly the regime it's designed for), but treat the "
+                        "odds ratio estimate with caution given the small counts."
+                    )
+                return result
 
             elif test_name == "ztest":
-
                 if tail:
                     control_col = list(episode["pairs"].keys())[0]
                     control_value = episode["pairs"][control_col]["control_value"]
@@ -741,8 +915,8 @@ class ABTestSelector:
 
                     sub = df[control_mask | treatment_mask][[control_col, treatment_col, metric_col]].copy()
                     sub["group"] = None
-                    sub.loc[control_mask[control_mask | treatment_mask], "group"] = "control"
-                    sub.loc[treatment_mask[control_mask | treatment_mask], "group"] = "treatment"
+                    sub.loc[control_mask, "group"] = "control"
+                    sub.loc[treatment_mask, "group"] = "treatment"
 
                     group1 = sub[sub["group"] == "control"][metric_col]
                     group2 = sub[sub["group"] == "treatment"][metric_col]
@@ -760,7 +934,6 @@ class ABTestSelector:
                         int((group2 == success_label).sum()),
                     ]
                     nobs = [len(group1), len(group2)]
-
                 else:
                     categories = sorted(sub[metric_col[0]].unique())
                     success_label = categories[0]
@@ -770,13 +943,9 @@ class ABTestSelector:
                     counts = [int((g[metric_col[0]] == success_label).sum()) for _, g in groups]
                     nobs = [len(g) for _, g in groups]
 
-                statistic, p_value = proportions_ztest(
-                    count=counts,
-                    nobs=nobs,
-                    alternative=tail,
-                )
+                statistic, p_value = proportions_ztest(count=counts, nobs=nobs, alternative=tail)
 
-                return {
+                result = {
                     "test": "z_test_proportions",
                     "conducted": True,
                     "statistic": float(statistic),
@@ -784,7 +953,15 @@ class ABTestSelector:
                     "significant": bool(p_value < alpha),
                     "success_category": success_label,
                 }
-    
+                if min(nobs) * min(
+                    counts[i] / nobs[i] if nobs[i] else 0 for i in range(len(nobs))
+                ) < 5:
+                    result["warning"] = (
+                        "Normal approximation for proportions may be unreliable when "
+                        "n*p or n*(1-p) is small in either group (rule of thumb: >=5)."
+                    )
+                return result
+
             elif test_name == "manova":
                 result = self.mannova_test(df=sub, allocation_col=allocation_col, metric_col=metric_col, alpha=alpha)
                 if isinstance(result, dict):

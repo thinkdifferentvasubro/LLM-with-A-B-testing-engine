@@ -88,7 +88,7 @@ Args:
 
         test (str): "", "ttest", "welchttest", "mannwhitneyu", "anova",
             "kruskalwallis", "fisherexact", "ztest", "chisquare",
-            "manova", "gtest". Use the named test only if the user
+            "manova", "gtest", "welchanova". Use the named test only if the user
             explicitly requests it. Otherwise leave test="" for
             automatic selection.
 

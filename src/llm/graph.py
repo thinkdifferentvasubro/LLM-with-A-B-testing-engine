@@ -57,7 +57,7 @@ class Episode(BaseModel):
     test: Literal[
         "", "ttest", "welchttest", "mannwhitneyu", "anova",
         "kruskalwallis", "fisherexact", "ztest", "chisquare",
-        "manova", "gtest"
+        "manova", "gtest", "welchanova"
     ] = ""
     tail: Literal["", "greater", "less"] = ""
 
@@ -83,18 +83,17 @@ def classify_intent(state: State):
         start_on="human"
     )
     if not state.get("csv_path"):
-        content = "the csv is not uploaded by the user"
+        csv_status = " csv upload status: the csv is not uploaded by the user"
     else:
-        content = "the data csv is uploaded by the user"
+        csv_status = " csv upload status: the data csv is uploaded by the user"
 
-    csv_message = [{"role": "assistant", "content": content}]
     structured_lmm = llm.with_structured_output(IntentClassifier)
     result = structured_lmm.invoke([
         {
             "role": "system",
-            "content": intent_prompt
+            "content": intent_prompt + csv_status
         }
-    ] + csv_message + trimmed)
+    ] + trimmed)
     print("intent")
     return {
         "message_intent": result.message_intent,
