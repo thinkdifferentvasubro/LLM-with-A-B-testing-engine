@@ -152,30 +152,48 @@ def both_(state: State):
     return results
 
 def reasoning(state: State):
-    tool_messages = []
+    tool_context = []
 
     if state.get("ab_test_result"):
-        tool_messages.append({
-            "role": "assistant",
-            "content": f"[Tool: A/B test analysis]\n{state['ab_test_result']}"
-        })
+        tool_context.append(
+            f"[A/B TEST TOOL RESULT]\n{state['ab_test_result']}"
+        )
 
     if state.get("rag_result"):
-        tool_messages.append({
-            "role": "assistant",
-            "content": f"[Tool: Historical/RAG retrieval]\n{state['rag_result']}"
-        })
+        tool_context.append(
+            f"[HISTORICAL TEST TOOL RESULT]\n{state['rag_result']}"
+        )
 
-    system_content = reasoning_prompt
+    context = "\n\n".join(tool_context)
+
     response = llm.invoke(
         [
-            {"role": "system", "content": system_content}
-        ] + state["messages"] + tool_messages
+            {
+                "role": "system",
+                "content": reasoning_prompt
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"User's question:\n{state['messages'][-1].content}\n\n"
+                    f"Tool results:\n{context}\n\n"
+                    "Answer the user's question directly. "
+                    "Interpret the results instead of repeating the tool output."
+                )
+            }
+        ]
     )
+
     print("reasoning")
 
-    return {"messages": tool_messages + [{"role": "assistant", "content": response.content}]}
-
+    return {
+        "messages": [
+            {
+                "role": "assistant",
+                "content": response.content
+            }
+        ]
+    }
 graph_builder = StateGraph(State)
 
 graph_builder.add_node("classifier", classify_intent)

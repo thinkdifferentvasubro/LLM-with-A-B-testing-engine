@@ -1,5 +1,3 @@
-import os
-import sys
 import pandas as pd
 from preprocessing import Preprocessor
 from ab_test_selector import ABTestSelector
