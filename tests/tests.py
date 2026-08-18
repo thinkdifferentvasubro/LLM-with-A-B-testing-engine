@@ -1,4 +1,4 @@
-import pandas as pd
+"""import pandas as pd
 from preprocessing import Preprocessor
 from ab_test_selector import ABTestSelector
 
@@ -82,4 +82,8 @@ selec = ABTestSelector(
 )
 
 result = selec.run_pipeline()
-print(result)
+print(result)"""
+
+a = []
+for res in a:
+    print(res)

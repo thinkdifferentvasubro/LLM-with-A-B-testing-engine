@@ -1,15 +1,26 @@
 Classify the user's message as exactly one of: "conduct test", "retrieve tests", "both", "chat". Output only the label string, no explanation.
 
-- conduct test: references a CSV/dataset/file AND wants to run/perform/set up a NEW test. E.g. "run a test comparing variant A vs B on conversion", "does variant B convert better?" (question phrasing still counts).
+You are given the full conversation so far. Use the conversation history to understand references and determine whether the user is referring to an existing result or requesting a new analysis.
 
-- retrieve tests: wants to look up/discuss the RESULTS of an already-run test, identified by a matchable metric, test name, or group (e.g. "what was the p-value for checkout conversion", "show me the SMD for region"). The retrieval store has no date/time field — a bare time reference ("last week's test") alone is NOT matchable and does not qualify.
+Source scope:
+- "In-session output" means any result, statistic, test, interpretation, or conclusion already produced by the assistant earlier in the current conversation.
+- "Historical test records" means stored or logged results from previous runs or sessions that are not already present in the current conversation.
+- A reference to something already present in the current conversation must not be treated as a historical retrieval request.
 
-- both: wants a new test AND recall of a prior one in the same message, with a retrievable identifier for the prior one (e.g. "run a test on the new data and compare it to the earlier checkout conversion test").
+Intent definitions:
+- "conduct test": The user wants a new statistical analysis to be performed on the currently provided dataset. This includes requests to run, rerun, repeat, redo, recalculate, perform, execute, or conduct an analysis. It also includes data-driven questions where answering the question requires analyzing the provided dataset, even if a related analysis was already performed earlier in the conversation.
+- "retrieve tests": The user wants results or information from a previously completed test stored in historical test records. The request must refer to a historical test rather than results already available in the current conversation.
+- "both": The user explicitly requests a new analysis on the provided dataset while also requesting retrieval or comparison with a historical test record in the same message.
+- "chat": The user is only asking for explanation, interpretation, clarification, restatement, or general conversation and does not request a new analysis or historical test retrieval.
 
-- chat: everything else — general questions, abstract stats explanations (e.g. "what's a p-value", "Mann-Whitney vs t-test"), or a past-test reference with no retrievable identifier (e.g. "what did we find last week?" — nothing for rag_search to match, so default here and ask a clarifying question instead).
-
-Tie-breaking:
-1. Names a specific metric/test type/group tied to a past result -> retrieve tests, even if phrased as "explain"/"interpret".
-2. References a dataset/file and asks to run/compare/test something new -> conduct test, even as a question.
-3. Bare time reference with no other identifier -> chat, never retrieve tests.
-4. If genuinely ambiguous between two categories, prefer the more specific one (conduct test or retrieve tests) over chat.
+Priority rules:
+1. An explicit request for a new analysis always takes priority over interpreting an existing result. If the user asks to run, rerun, repeat, redo, recalculate, or otherwise perform the analysis again on the provided dataset, classify as "conduct test".
+2. A follow-up question about an existing in-session result is "chat" when the user only wants the existing result explained, clarified, restated, or interpreted.
+3. If answering the user's question requires analyzing the provided dataset again, classify as "conduct test", even when the conversation already contains a related analysis.
+4. Do not classify a message as "retrieve tests" merely because it refers to a metric, variable, group, test, or result. Retrieval requires that the referenced result comes from historical records.
+5. "both" requires both actions in the same request: a new analysis of the provided dataset and retrieval/comparison with a historical test record.
+6. Statements or questions about differences, equality, balance, direction, significance, or relationships between variables/groups are part of a dataset analysis when answering them requires analyzing the provided dataset.
+7. A request to determine a missing detail from an existing result is "chat" if the existing result already contains enough information to answer it without performing a new analysis. If determining that detail requires rerunning or analyzing the provided dataset, classify as "conduct test".
+8. If the user refers to previous conversation context without requesting a new analysis and without identifying a historical test record, classify as "chat".
+9. If the message contains multiple requests, evaluate all requests together. If any request explicitly requires a new analysis of the provided dataset and does not require historical retrieval, classify as "conduct test".
+10. If genuinely ambiguous and a dataset is available, prefer "conduct test" when the user's requested answer could reasonably require analysis of that dataset; otherwise classify as "chat".

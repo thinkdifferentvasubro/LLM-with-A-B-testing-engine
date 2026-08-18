@@ -263,10 +263,8 @@ class ABTestSelector:
             "test": "fisher_exact",
             "statistic": float(odds_ratio),
             "p_value": float(p_value_fisher),
-            "control": {"column": control_col, "value": control_value},
-            "treatment": {"column": treatment_col, "value": treatment_value},
+            "result": f"column {control_col} value {control_value} was {tail} than column {treatment_col} value {treatment_value}" if p_value_fisher < alpha else f"column {control_col} value {control_value} was not {tail} than column {treatment_col} value {treatment_value}",
             "category_compared": table.columns[0],
-            "tail": tail,
             "significant": bool(p_value_fisher < alpha),
         }
 
@@ -416,47 +414,48 @@ class ABTestSelector:
             "p_value": float(p_value),
             "significant": bool(p_value < alpha),
         }
-
     def one_tailed_numeric_test(
-        self,
-        df: pd.DataFrame,
-        allocation_col: list,
-        metric_col: str,
-        episode: dict,
-        alpha: float = 0.05,
-        outlier_forces_nonparametric: bool = True,
-        min_n_for_parametric: int = 8,
-    ):
+            self,
+            df: pd.DataFrame,
+            allocation_col: list,
+            metric_col: str,
+            episode: dict,
+            alpha: float = 0.05,
+            outlier_forces_nonparametric: bool = True,
+            min_n_for_parametric: int = 8,
+        ):
         df = df[allocation_col + [metric_col]]
         control_col = list(episode["pairs"].keys())[0]
         control_value = episode["pairs"][control_col]["control_value"]
         treatment_col, treatment_value = episode["pairs"][control_col]["treatment"][0]
         tail = episode["tail"]
- 
+
         control_mask = df[control_col] == control_value
         treatment_mask = df[treatment_col] == treatment_value
- 
+
         sub = df[control_mask | treatment_mask][[control_col, treatment_col, metric_col]].copy()
         sub["group"] = None
         sub.loc[control_mask[control_mask | treatment_mask], "group"] = "control"
         sub.loc[treatment_mask[control_mask | treatment_mask], "group"] = "treatment"
- 
+
         group1 = sub[sub["group"] == "control"][metric_col]
         group2 = sub[sub["group"] == "treatment"][metric_col]
- 
+
         if group1.empty or group2.empty:
             return "control and treatment groups must both be non-empty for one tailed test"
- 
+
         diag = self.evaluate_groups([group1, group2], alpha=alpha)
- 
+
         use_parametric = (
             diag["all_normal"]
             and diag["min_sample_size"] >= min_n_for_parametric
             and not (outlier_forces_nonparametric and diag["any_outliers"])
         )
- 
-        base_result = {"diagnostics": diag}
- 
+
+        base_result = {
+            "diagnostics": diag,
+        }
+
         if use_parametric:
             statistic, p_value = stats.ttest_ind(
                 group1,
@@ -465,23 +464,25 @@ class ABTestSelector:
                 equal_var=diag["equal_var"],
             )
             test_name = "student_t_test" if diag["equal_var"] else "welch_t_test"
- 
+
             return {
                 **base_result,
+                "result": f"column {control_col} value {control_value} was {tail} than column {treatment_col} value {treatment_value}" if p_value < alpha else f"column {control_col} value {control_value} was not {tail} than column {treatment_col} value {treatment_value}",
                 "test": test_name,
                 "statistic": float(statistic),
                 "p_value": float(p_value),
                 "significant": bool(p_value < alpha),
             }
- 
+
         statistic, p_value = stats.mannwhitneyu(
             group1,
             group2,
             alternative=tail
         )
- 
+
         return {
             **base_result,
+            "result": f"column {control_col} value {control_value} was {tail} than column {treatment_col} value {treatment_value}" if p_value < alpha else f"column {control_col} value {control_value} was not {tail} than column {treatment_col} value {treatment_value}",
             "test": "mann_whitney_u",
             "statistic": float(statistic),
             "p_value": float(p_value),
@@ -542,7 +543,6 @@ class ABTestSelector:
 
         stats_table = result.results["_group"]["stat"]
 
-        # Pillai's Trace (most robust)
         pillai = stats_table.loc["Pillai's trace"]
 
         statistic = float(pillai["Value"])
@@ -711,6 +711,12 @@ class ABTestSelector:
                 statistic, p_value = stats.ttest_ind(
                     group1, group2, equal_var=equal_var, alternative=tail
                 )
+                if tail:
+                    group_info = {
+                        "result": f"column {control_col} value {control_value} was {tail} than column {treatment_col} value {treatment_value}" if p_value < alpha else f"column {control_col} value {control_value} was not {tail} than column {treatment_col} value {treatment_value}",
+                    }
+                else:
+                    group_info = {}
                 result = {
                     "test": "student_t_test" if equal_var else "welch_t_test",
                     "conducted": True,
@@ -718,6 +724,8 @@ class ABTestSelector:
                     "p_value": float(p_value),
                     "significant": bool(p_value < alpha),
                     "diagnostics": diag,
+                    "tail": tail,
+                    **group_info,
                 }
                 warnings = _build_warnings(diag, labels)
                 if test_name == "ttest" and not diag["equal_var"]:
@@ -760,6 +768,13 @@ class ABTestSelector:
 
                 diag = self.evaluate_groups([group1, group2], alpha=alpha)
                 statistic, p_value = stats.mannwhitneyu(group1, group2, alternative=tail)
+
+                if tail:
+                    group_info = {
+                        "result": f"column {control_col} value {control_value} was {tail} than column {treatment_col} value {treatment_value}" if p_value < alpha else f"column {control_col} value {control_value} was not {tail} than column {treatment_col} value {treatment_value}",
+                        }
+                else:
+                    group_info = {}
                 result = {
                     "test": "mann_whitney_u",
                     "conducted": True,
@@ -767,6 +782,8 @@ class ABTestSelector:
                     "p_value": float(p_value),
                     "significant": bool(p_value < alpha),
                     "diagnostics": diag,
+                    "tail": tail,
+                    **group_info,
                 }
                 if diag["min_sample_size"] < 8:
                     result["warning"] = (
@@ -867,6 +884,8 @@ class ABTestSelector:
                     if table.shape != (2, 2):
                         return f"'fisherexact' requires a 2x2 table; got shape {table.shape}."
                     odds_ratio, p_value = stats.fisher_exact(table.values, alternative="two-sided")
+                    tail_out = "two-sided"
+                    group_info = {}
                 else:
                     control_col = list(episode["pairs"].keys())[0]
                     control_value = episode["pairs"][control_col]["control_value"]
@@ -886,6 +905,10 @@ class ABTestSelector:
                         return f"'fisherexact' requires a 2x2 table; got shape {table.shape}."
                     table = table.loc[["control", "treatment"]]
                     odds_ratio, p_value = stats.fisher_exact(table.values, alternative=tail)
+                    tail_out = tail
+                    group_info = {
+                        "result": f"column {control_col} value {control_value} was {tail} than column {treatment_col} value {treatment_value}" if p_value < alpha else f"column {control_col} value {control_value} was not {tail} than column {treatment_col} value {treatment_value}",
+                    }
 
                 result = {
                     "test": "fisher_exact",
@@ -893,6 +916,8 @@ class ABTestSelector:
                     "statistic": float(odds_ratio),
                     "p_value": float(p_value),
                     "significant": bool(p_value < alpha),
+                    "tail": tail_out,
+                    **group_info,
                 }
                 if (table.values < 5).any():
                     result["warning"] = (
@@ -901,7 +926,7 @@ class ABTestSelector:
                         "odds ratio estimate with caution given the small counts."
                     )
                 return result
-
+            
             elif test_name == "ztest":
                 if tail:
                     control_col = list(episode["pairs"].keys())[0]
@@ -934,6 +959,9 @@ class ABTestSelector:
                         int((group2 == success_label).sum()),
                     ]
                     nobs = [len(group1), len(group2)]
+                    group_info = {
+                        "result": f"column {control_col} value {control_value} was {tail} than column {treatment_col} value {treatment_value}",
+                    }
                 else:
                     categories = sorted(sub[metric_col[0]].unique())
                     success_label = categories[0]
@@ -942,8 +970,15 @@ class ABTestSelector:
                     groups = list(sub.groupby(allocation_col))
                     counts = [int((g[metric_col[0]] == success_label).sum()) for _, g in groups]
                     nobs = [len(g) for _, g in groups]
+                    group_info = {}
 
                 statistic, p_value = proportions_ztest(count=counts, nobs=nobs, alternative=tail)
+                if tail:
+                    group_info = {
+                        "result": f"column {control_col} value {control_value} was {tail} than column {treatment_col} value {treatment_value}" if p_value < alpha else f"column {control_col} value {control_value} was not {tail} than column {treatment_col} value {treatment_value}",
+                        }
+                else:
+                    group_info = {}
 
                 result = {
                     "test": "z_test_proportions",
@@ -952,6 +987,8 @@ class ABTestSelector:
                     "p_value": float(p_value),
                     "significant": bool(p_value < alpha),
                     "success_category": success_label,
+                    "tail": tail,
+                    **group_info,
                 }
                 if min(nobs) * min(
                     counts[i] / nobs[i] if nobs[i] else 0 for i in range(len(nobs))
@@ -961,7 +998,7 @@ class ABTestSelector:
                         "n*p or n*(1-p) is small in either group (rule of thumb: >=5)."
                     )
                 return result
-
+            
             elif test_name == "manova":
                 result = self.mannova_test(df=sub, allocation_col=allocation_col, metric_col=metric_col, alpha=alpha)
                 if isinstance(result, dict):

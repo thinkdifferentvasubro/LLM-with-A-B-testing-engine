@@ -92,12 +92,18 @@ Args:
             explicitly requests it. Otherwise leave test="" for
             automatic selection.
 
-        tail (str): "", "greater", "less". Interpretation is always
-            control vs treatment. Normalize wording:
-            - control > treatment    -> greater
-            - control < treatment    -> less
-            - treatment > control    -> less
-            - treatment < control    -> greater
+        tail (str): "", "greater", "less". Always interpret the tail as control vs treatment.
+		Use tail="" for a non-directional comparison where the user only asks whether the groups differ.
+		If the user asks which group is higher, lower, better, worse, greater, smaller, larger, more, fewer, most, least, highest, lowest, or otherwise asks to identify the group with the stronger/weaker outcome, treat it as a directional comparison and assign the appropriate tail based on the requested direction:
+		- If the user asks whether/which group has a higher, greater, larger, more, most, better, or higher-valued metric:
+  		- control > treatment → "greater"
+  		- control < treatment → "less"
+		- If the user asks whether/which group has a lower, smaller, fewer, least, worse, or lower-valued metric:
+  		- control < treatment → "less"
+  		- control > treatment → "greater"
+		The tail is always defined relative to control vs treatment, regardless of which group the user expects to win.
+		Do not use tail="" when the user's wording explicitly asks to determine which group is higher/lower or otherwise requests a directional comparison.
+
 
     Covariate_cols (list[str]): Covariate-eligible = PRE-TREATMENT
             columns only — variables that already exist before treatment

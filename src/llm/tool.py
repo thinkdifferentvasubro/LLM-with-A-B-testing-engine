@@ -81,5 +81,7 @@ def rag_search(query: str, n_results: int, user_id: str) -> str:
         )
     final_rag_result = "Rag results: "
     for rag_result in rag_results["documents"]:
+        if not rag_result:
+            return "could not find the related test/experiment"
         final_rag_result += rag_result[0]
-    return final_rag_result 
+    return final_rag_result
