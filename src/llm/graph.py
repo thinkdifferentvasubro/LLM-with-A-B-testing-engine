@@ -59,7 +59,7 @@ class Episode(BaseModel):
         "kruskalwallis", "fisherexact", "ztest", "chisquare",
         "manova", "gtest", "welchanova"
     ] = ""
-    tail: Literal["", "greater", "less"] = ""
+    tail: list[str]
 
 class test_params(BaseModel):
     episodes: list[Episode]

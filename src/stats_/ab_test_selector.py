@@ -240,7 +240,7 @@ class ABTestSelector:
         control_col = list(episode["pairs"].keys())[0]
         control_value = episode["pairs"][control_col]["control_value"]
         treatment_col, treatment_value = episode["pairs"][control_col]["treatment"][0]
-        tail = episode["tail"]
+        tails = episode["tail"]
 
         control_mask = df[control_col] == control_value
         treatment_mask = df[treatment_col] == treatment_value
@@ -257,16 +257,19 @@ class ABTestSelector:
             return "groups and categories should be equal to 2 for one tailed test"
 
         table = table.loc[["control", "treatment"]]
-        odds_ratio, p_value_fisher = stats.fisher_exact(table.values, alternative=tail)
-
-        return {
-            "test": "fisher_exact",
-            "statistic": float(odds_ratio),
-            "p_value": float(p_value_fisher),
-            "result": f"column {control_col} value {control_value} was {tail} than column {treatment_col} value {treatment_value}" if p_value_fisher < alpha else f"column {control_col} value {control_value} was not {tail} than column {treatment_col} value {treatment_value}",
-            "category_compared": table.columns[0],
-            "significant": bool(p_value_fisher < alpha),
-        }
+        result = {}
+        for i in range(len(tails)):
+            tail = tails[i]
+            odds_ratio, p_value_fisher = stats.fisher_exact(table.values, alternative=tail)
+            result.update({
+                f"test {i}": "fisher_exact",
+                f"statistic {i}": float(odds_ratio),
+                f"p_value {i}": float(p_value_fisher),
+                f"result {i}": f"column {control_col} value {control_value} was {tail} than column {treatment_col} value {treatment_value}" if p_value_fisher < alpha else f"column {control_col} value {control_value} was not {tail} than column {treatment_col} value {treatment_value}",
+                f"category_compared {i}": table.columns[0],
+                f"significant {i}": bool(p_value_fisher < alpha),
+            })
+        return result
 
     def evaluate_properties(self, series: pd.Series, alpha: float = 0.05) -> dict:
             
@@ -414,21 +417,22 @@ class ABTestSelector:
             "p_value": float(p_value),
             "significant": bool(p_value < alpha),
         }
+
     def one_tailed_numeric_test(
-            self,
-            df: pd.DataFrame,
-            allocation_col: list,
-            metric_col: str,
-            episode: dict,
-            alpha: float = 0.05,
-            outlier_forces_nonparametric: bool = True,
-            min_n_for_parametric: int = 8,
-        ):
+        self,
+        df: pd.DataFrame,
+        allocation_col: list,
+        metric_col: str,
+        episode: dict,
+        alpha: float = 0.05,
+        outlier_forces_nonparametric: bool = True,
+        min_n_for_parametric: int = 8,
+    ):
         df = df[allocation_col + [metric_col]]
         control_col = list(episode["pairs"].keys())[0]
         control_value = episode["pairs"][control_col]["control_value"]
         treatment_col, treatment_value = episode["pairs"][control_col]["treatment"][0]
-        tail = episode["tail"]
+        tails = episode["tail"]
 
         control_mask = df[control_col] == control_value
         treatment_mask = df[treatment_col] == treatment_value
@@ -452,42 +456,46 @@ class ABTestSelector:
             and not (outlier_forces_nonparametric and diag["any_outliers"])
         )
 
-        base_result = {
+        result = {
             "diagnostics": diag,
         }
 
-        if use_parametric:
-            statistic, p_value = stats.ttest_ind(
-                group1,
-                group2,
-                alternative=tail,
-                equal_var=diag["equal_var"],
-            )
-            test_name = "student_t_test" if diag["equal_var"] else "welch_t_test"
+        for i in range(len(tails)):
+            tail = tails[i]
 
-            return {
-                **base_result,
-                "result": f"column {control_col} value {control_value} was {tail} than column {treatment_col} value {treatment_value}" if p_value < alpha else f"column {control_col} value {control_value} was not {tail} than column {treatment_col} value {treatment_value}",
-                "test": test_name,
-                "statistic": float(statistic),
-                "p_value": float(p_value),
-                "significant": bool(p_value < alpha),
-            }
+            if use_parametric:
+                statistic, p_value = stats.ttest_ind(
+                    group1,
+                    group2,
+                    alternative=tail,
+                    equal_var=diag["equal_var"],
+                )
 
-        statistic, p_value = stats.mannwhitneyu(
-            group1,
-            group2,
-            alternative=tail
-        )
+                test_name = "student_t_test" if diag["equal_var"] else "welch_t_test"
 
-        return {
-            **base_result,
-            "result": f"column {control_col} value {control_value} was {tail} than column {treatment_col} value {treatment_value}" if p_value < alpha else f"column {control_col} value {control_value} was not {tail} than column {treatment_col} value {treatment_value}",
-            "test": "mann_whitney_u",
-            "statistic": float(statistic),
-            "p_value": float(p_value),
-            "significant": bool(p_value < alpha),
-        }
+            else:
+                statistic, p_value = stats.mannwhitneyu(
+                    group1,
+                    group2,
+                    alternative=tail
+                )
+
+                test_name = "mann_whitney_u"
+
+            result.update({
+                f"test {i}": test_name,
+                f"statistic {i}": float(statistic),
+                f"p_value {i}": float(p_value),
+                f"result {i}": (
+                    f"column {control_col} value {control_value} was {tail} than column {treatment_col} value {treatment_value}"
+                    if p_value < alpha
+                    else
+                    f"column {control_col} value {control_value} was not {tail} than column {treatment_col} value {treatment_value}"
+                ),
+                f"significant {i}": bool(p_value < alpha),
+            })
+
+        return result
     
     def mannova_test(self, df: pd.DataFrame, allocation_col: list, metric_col: list, alpha=0.05):
         
@@ -671,125 +679,193 @@ class ABTestSelector:
 
         try:
             if test_name in ("ttest", "welchttest"):
-                if tail:
-                    control_col = list(episode["pairs"].keys())[0]
-                    control_value = episode["pairs"][control_col]["control_value"]
-                    treatment_col, treatment_value = episode["pairs"][control_col]["treatment"][0]
-                    metric_col = episode["metrics"][0]
-                    tail = episode["tail"]
+                control_col = list(episode["pairs"].keys())[0]
+                control_value = episode["pairs"][control_col]["control_value"]
+                treatment_col, treatment_value = episode["pairs"][control_col]["treatment"][0]
+                metric_col = episode["metrics"][0]
+                tails = episode["tail"]
 
-                    control_mask = df[control_col] == control_value
-                    treatment_mask = df[treatment_col] == treatment_value
+                control_mask = df[control_col] == control_value
+                treatment_mask = df[treatment_col] == treatment_value
 
-                    sub = df[control_mask | treatment_mask][[control_col, treatment_col, metric_col]].copy()
-                    sub["group"] = None
-                    sub.loc[control_mask, "group"] = "control"
-                    sub.loc[treatment_mask, "group"] = "treatment"
+                sub = df[control_mask | treatment_mask][
+                    [control_col, treatment_col, metric_col]
+                ].copy()
 
-                    group1 = sub[sub["group"] == "control"][metric_col]
-                    group2 = sub[sub["group"] == "treatment"][metric_col]
+                sub["group"] = None
+                sub.loc[control_mask, "group"] = "control"
+                sub.loc[treatment_mask, "group"] = "treatment"
 
-                    if group1.empty or group2.empty:
-                        return "control and treatment groups must both be non-empty for one tailed test"
+                group1 = sub[sub["group"] == "control"][metric_col]
+                group2 = sub[sub["group"] == "treatment"][metric_col]
 
-                    labels = ("control", "treatment")
-                else:
-                    grouped = [g[metric_col[0]] for _, g in sub.groupby(allocation_col)]
-                    group1, group2 = grouped[0], grouped[1]
-                    tail = "two-sided"
-                    labels = ("group 1", "group 2")
+                if group1.empty or group2.empty:
+                    return "control and treatment groups must both be non-empty"
+
+                labels = ("control", "treatment")
 
                 diag = self.evaluate_groups([group1, group2], alpha=alpha)
 
                 if test_name == "welchttest":
                     equal_var = False
-                elif test_name == "ttest":
+                else:
                     equal_var = True
-                else:
-                    equal_var = diag["equal_var"]
 
-                statistic, p_value = stats.ttest_ind(
-                    group1, group2, equal_var=equal_var, alternative=tail
-                )
-                if tail:
-                    group_info = {
-                        "result": f"column {control_col} value {control_value} was {tail} than column {treatment_col} value {treatment_value}" if p_value < alpha else f"column {control_col} value {control_value} was not {tail} than column {treatment_col} value {treatment_value}",
-                    }
-                else:
-                    group_info = {}
                 result = {
-                    "test": "student_t_test" if equal_var else "welch_t_test",
                     "conducted": True,
-                    "statistic": float(statistic),
-                    "p_value": float(p_value),
-                    "significant": bool(p_value < alpha),
                     "diagnostics": diag,
-                    "tail": tail,
-                    **group_info,
                 }
+
                 warnings = _build_warnings(diag, labels)
+
                 if test_name == "ttest" and not diag["equal_var"]:
                     warnings.append(
                         "You requested 'ttest' (equal variances assumed) but Levene's test "
                         "indicates unequal variances; results may be biased — consider 'welchttest'."
                     )
+
+                if not tails:
+                    statistic, p_value = stats.ttest_ind(
+                        group1,
+                        group2,
+                        equal_var=equal_var
+                    )
+
+                    result.update({
+                        "test 0": "student_t_test" if equal_var else "welch_t_test",
+                        "statistic 0": float(statistic),
+                        "p_value 0": float(p_value),
+                        "significant 0": bool(p_value < alpha),
+                        "tail 0": [],
+                    })
+
+                    result["result 0"] = (
+                        f"column {control_col} value {control_value} and "
+                        f"column {treatment_col} value {treatment_value} were significantly different"
+                        if p_value < alpha
+                        else
+                        f"column {control_col} value {control_value} and "
+                        f"column {treatment_col} value {treatment_value} were not significantly different"
+                    )
+
+                else:
+                    for i, current_tail in enumerate(tails):
+                        statistic, p_value = stats.ttest_ind(
+                            group1,
+                            group2,
+                            equal_var=equal_var,
+                            alternative=current_tail
+                        )
+
+                        result.update({
+                            f"test {i}": "student_t_test" if equal_var else "welch_t_test",
+                            f"statistic {i}": float(statistic),
+                            f"p_value {i}": float(p_value),
+                            f"significant {i}": bool(p_value < alpha),
+                            f"tail {i}": current_tail,
+                        })
+
+                        result[f"result {i}"] = (
+                            f"column {control_col} value {control_value} was {current_tail} "
+                            f"than column {treatment_col} value {treatment_value}"
+                            if p_value < alpha
+                            else
+                            f"column {control_col} value {control_value} was not {current_tail} "
+                            f"than column {treatment_col} value {treatment_value}"
+                        )
+
                 if warnings:
                     result["warning"] = " ".join(warnings)
+
                 return result
 
             elif test_name == "mannwhitneyu":
-                if tail:
-                    control_col = list(episode["pairs"].keys())[0]
-                    control_value = episode["pairs"][control_col]["control_value"]
-                    treatment_col, treatment_value = episode["pairs"][control_col]["treatment"][0]
-                    metric_col = episode["metrics"][0]
-                    tail = episode["tail"]
+                control_col = list(episode["pairs"].keys())[0]
+                control_value = episode["pairs"][control_col]["control_value"]
+                treatment_col, treatment_value = episode["pairs"][control_col]["treatment"][0]
+                metric_col = episode["metrics"][0]
+                tails = episode["tail"]
 
-                    control_mask = df[control_col] == control_value
-                    treatment_mask = df[treatment_col] == treatment_value
+                control_mask = df[control_col] == control_value
+                treatment_mask = df[treatment_col] == treatment_value
 
-                    sub = df[control_mask | treatment_mask][[control_col, treatment_col, metric_col]].copy()
-                    sub["group"] = None
-                    sub.loc[control_mask, "group"] = "control"
-                    sub.loc[treatment_mask, "group"] = "treatment"
+                sub = df[control_mask | treatment_mask][
+                    [control_col, treatment_col, metric_col]
+                ].copy()
 
-                    group1 = sub[sub["group"] == "control"][metric_col]
-                    group2 = sub[sub["group"] == "treatment"][metric_col]
+                sub["group"] = None
+                sub.loc[control_mask, "group"] = "control"
+                sub.loc[treatment_mask, "group"] = "treatment"
 
-                    if group1.empty or group2.empty:
-                        return "control and treatment groups must both be non-empty for one tailed test"
+                group1 = sub[sub["group"] == "control"][metric_col]
+                group2 = sub[sub["group"] == "treatment"][metric_col]
 
-                    labels = ("control", "treatment")
-                else:
-                    grouped = [g[metric_col[0]] for _, g in sub.groupby(allocation_col)]
-                    group1, group2 = grouped[0], grouped[1]
-                    tail = "two-sided"
-                    labels = ("group 1", "group 2")
+                if group1.empty or group2.empty:
+                    return "control and treatment groups must both be non-empty"
+
+                labels = ("control", "treatment")
 
                 diag = self.evaluate_groups([group1, group2], alpha=alpha)
-                statistic, p_value = stats.mannwhitneyu(group1, group2, alternative=tail)
 
-                if tail:
-                    group_info = {
-                        "result": f"column {control_col} value {control_value} was {tail} than column {treatment_col} value {treatment_value}" if p_value < alpha else f"column {control_col} value {control_value} was not {tail} than column {treatment_col} value {treatment_value}",
-                        }
-                else:
-                    group_info = {}
                 result = {
-                    "test": "mann_whitney_u",
                     "conducted": True,
-                    "statistic": float(statistic),
-                    "p_value": float(p_value),
-                    "significant": bool(p_value < alpha),
                     "diagnostics": diag,
-                    "tail": tail,
-                    **group_info,
                 }
+
+                if not tails:
+                    statistic, p_value = stats.mannwhitneyu(
+                        group1,
+                        group2
+                    )
+
+                    result.update({
+                        "test 0": "mann_whitney_u",
+                        "statistic 0": float(statistic),
+                        "p_value 0": float(p_value),
+                        "significant 0": bool(p_value < alpha),
+                        "tail 0": [],
+                    })
+
+                    result["result 0"] = (
+                        f"column {control_col} value {control_value} and "
+                        f"column {treatment_col} value {treatment_value} were significantly different"
+                        if p_value < alpha
+                        else
+                        f"column {control_col} value {control_value} and "
+                        f"column {treatment_col} value {treatment_value} were not significantly different"
+                    )
+
+                else:
+                    for i, current_tail in enumerate(tails):
+                        statistic, p_value = stats.mannwhitneyu(
+                            group1,
+                            group2,
+                            alternative=current_tail
+                        )
+
+                        result.update({
+                            f"test {i}": "mann_whitney_u",
+                            f"statistic {i}": float(statistic),
+                            f"p_value {i}": float(p_value),
+                            f"significant {i}": bool(p_value < alpha),
+                            f"tail {i}": current_tail,
+                        })
+
+                        result[f"result {i}"] = (
+                            f"column {control_col} value {control_value} was {current_tail} "
+                            f"than column {treatment_col} value {treatment_value}"
+                            if p_value < alpha
+                            else
+                            f"column {control_col} value {control_value} was not {current_tail} "
+                            f"than column {treatment_col} value {treatment_value}"
+                        )
+
                 if diag["min_sample_size"] < 8:
                     result["warning"] = (
                         f"Smallest group has only {diag['min_sample_size']} observations; "
                         "the U-statistic's normal approximation may be unreliable this small."
                     )
+
                 return result
 
             elif test_name == "anova":
@@ -879,124 +955,197 @@ class ABTestSelector:
                 return result
 
             elif test_name == "fisherexact":
-                if not tail:
-                    table = pd.crosstab([sub[c] for c in allocation_col], sub[metric_col[0]])
-                    if table.shape != (2, 2):
-                        return f"'fisherexact' requires a 2x2 table; got shape {table.shape}."
-                    odds_ratio, p_value = stats.fisher_exact(table.values, alternative="two-sided")
-                    tail_out = "two-sided"
-                    group_info = {}
-                else:
-                    control_col = list(episode["pairs"].keys())[0]
-                    control_value = episode["pairs"][control_col]["control_value"]
-                    treatment_col, treatment_value = episode["pairs"][control_col]["treatment"][0]
-                    metric = episode["metrics"][0]
+                control_col = list(episode["pairs"].keys())[0]
+                control_value = episode["pairs"][control_col]["control_value"]
+                treatment_col, treatment_value = episode["pairs"][control_col]["treatment"][0]
+                metric = episode["metrics"][0]
+                tails = episode["tail"]
 
-                    control_mask = df[control_col] == control_value
-                    treatment_mask = df[treatment_col] == treatment_value
+                control_mask = df[control_col] == control_value
+                treatment_mask = df[treatment_col] == treatment_value
 
-                    sub = df[control_mask | treatment_mask][[control_col, treatment_col, metric]].copy()
-                    sub["group"] = None
-                    sub.loc[control_mask, "group"] = "control"
-                    sub.loc[treatment_mask, "group"] = "treatment"
+                sub = df[control_mask | treatment_mask][
+                    [control_col, treatment_col, metric]
+                ].copy()
 
-                    table = pd.crosstab(sub["group"], sub[metric])
-                    if table.shape != (2, 2):
-                        return f"'fisherexact' requires a 2x2 table; got shape {table.shape}."
-                    table = table.loc[["control", "treatment"]]
-                    odds_ratio, p_value = stats.fisher_exact(table.values, alternative=tail)
-                    tail_out = tail
-                    group_info = {
-                        "result": f"column {control_col} value {control_value} was {tail} than column {treatment_col} value {treatment_value}" if p_value < alpha else f"column {control_col} value {control_value} was not {tail} than column {treatment_col} value {treatment_value}",
-                    }
+                sub["group"] = None
+                sub.loc[control_mask, "group"] = "control"
+                sub.loc[treatment_mask, "group"] = "treatment"
+
+                table = pd.crosstab(sub["group"], sub[metric])
+
+                if table.shape != (2, 2):
+                    return f"'fisherexact' requires a 2x2 table; got shape {table.shape}."
+
+                table = table.loc[["control", "treatment"]]
 
                 result = {
-                    "test": "fisher_exact",
                     "conducted": True,
-                    "statistic": float(odds_ratio),
-                    "p_value": float(p_value),
-                    "significant": bool(p_value < alpha),
-                    "tail": tail_out,
-                    **group_info,
                 }
+
+                if not tails:
+                    odds_ratio, p_value = stats.fisher_exact(
+                        table.values
+                    )
+
+                    result.update({
+                        "test 0": "fisher_exact",
+                        "statistic 0": float(odds_ratio),
+                        "p_value 0": float(p_value),
+                        "significant 0": bool(p_value < alpha),
+                        "tail 0": [],
+                        "result 0": (
+                            f"column {control_col} value {control_value} and "
+                            f"column {treatment_col} value {treatment_value} were significantly different"
+                            if p_value < alpha
+                            else
+                            f"column {control_col} value {control_value} and "
+                            f"column {treatment_col} value {treatment_value} were not significantly different"
+                        ),
+                    })
+
+                else:
+                    for i, current_tail in enumerate(tails):
+                        odds_ratio, p_value = stats.fisher_exact(
+                            table.values,
+                            alternative=current_tail
+                        )
+
+                        result.update({
+                            f"test {i}": "fisher_exact",
+                            f"statistic {i}": float(odds_ratio),
+                            f"p_value {i}": float(p_value),
+                            f"significant {i}": bool(p_value < alpha),
+                            f"tail {i}": current_tail,
+                            f"result {i}": (
+                                f"column {control_col} value {control_value} was "
+                                f"{current_tail} than column {treatment_col} "
+                                f"value {treatment_value}"
+                                if p_value < alpha
+                                else
+                                f"column {control_col} value {control_value} was not "
+                                f"{current_tail} than column {treatment_col} "
+                                f"value {treatment_value}"
+                            ),
+                        })
+
                 if (table.values < 5).any():
                     result["warning"] = (
                         "Some cell counts are below 5; Fisher's exact test is still valid "
                         "here (that's exactly the regime it's designed for), but treat the "
                         "odds ratio estimate with caution given the small counts."
                     )
+
                 return result
             
             elif test_name == "ztest":
-                if tail:
-                    control_col = list(episode["pairs"].keys())[0]
-                    control_value = episode["pairs"][control_col]["control_value"]
-                    treatment_col, treatment_value = episode["pairs"][control_col]["treatment"][0]
-                    metric_col = episode["metrics"][0]
-                    tail = episode["tail"]
+                control_col = list(episode["pairs"].keys())[0]
+                control_value = episode["pairs"][control_col]["control_value"]
+                treatment_col, treatment_value = episode["pairs"][control_col]["treatment"][0]
+                metric_col = episode["metrics"][0]
+                tails = episode["tail"]
 
-                    control_mask = df[control_col] == control_value
-                    treatment_mask = df[treatment_col] == treatment_value
+                control_mask = df[control_col] == control_value
+                treatment_mask = df[treatment_col] == treatment_value
 
-                    sub = df[control_mask | treatment_mask][[control_col, treatment_col, metric_col]].copy()
-                    sub["group"] = None
-                    sub.loc[control_mask, "group"] = "control"
-                    sub.loc[treatment_mask, "group"] = "treatment"
+                sub = df[control_mask | treatment_mask][
+                    [control_col, treatment_col, metric_col]
+                ].copy()
 
-                    group1 = sub[sub["group"] == "control"][metric_col]
-                    group2 = sub[sub["group"] == "treatment"][metric_col]
+                sub["group"] = None
+                sub.loc[control_mask, "group"] = "control"
+                sub.loc[treatment_mask, "group"] = "treatment"
 
-                    if group1.empty or group2.empty:
-                        return "control and treatment groups must both be non-empty for one tailed test"
+                group1 = sub[sub["group"] == "control"][metric_col]
+                group2 = sub[sub["group"] == "treatment"][metric_col]
 
-                    categories = sorted(sub[metric_col].unique())
-                    if len(categories) != 2:
-                        return "ztest requires a binary categorical metric"
+                if group1.empty or group2.empty:
+                    return "control and treatment groups must both be non-empty"
 
-                    success_label = categories[0]
-                    counts = [
-                        int((group1 == success_label).sum()),
-                        int((group2 == success_label).sum()),
-                    ]
-                    nobs = [len(group1), len(group2)]
-                    group_info = {
-                        "result": f"column {control_col} value {control_value} was {tail} than column {treatment_col} value {treatment_value}",
-                    }
-                else:
-                    categories = sorted(sub[metric_col[0]].unique())
-                    success_label = categories[0]
-                    tail = episode["tail"]
+                categories = sorted(sub[metric_col].unique())
 
-                    groups = list(sub.groupby(allocation_col))
-                    counts = [int((g[metric_col[0]] == success_label).sum()) for _, g in groups]
-                    nobs = [len(g) for _, g in groups]
-                    group_info = {}
+                if len(categories) != 2:
+                    return "ztest requires a binary categorical metric"
 
-                statistic, p_value = proportions_ztest(count=counts, nobs=nobs, alternative=tail)
-                if tail:
-                    group_info = {
-                        "result": f"column {control_col} value {control_value} was {tail} than column {treatment_col} value {treatment_value}" if p_value < alpha else f"column {control_col} value {control_value} was not {tail} than column {treatment_col} value {treatment_value}",
-                        }
-                else:
-                    group_info = {}
+                success_label = categories[0]
+
+                counts = [
+                    int((group1 == success_label).sum()),
+                    int((group2 == success_label).sum()),
+                ]
+
+                nobs = [len(group1), len(group2)]
+
+                group_info = {
+                    "control_col": control_col,
+                    "control_value": control_value,
+                    "treatment_col": treatment_col,
+                    "treatment_value": treatment_value,
+                }
 
                 result = {
-                    "test": "z_test_proportions",
                     "conducted": True,
-                    "statistic": float(statistic),
-                    "p_value": float(p_value),
-                    "significant": bool(p_value < alpha),
                     "success_category": success_label,
-                    "tail": tail,
-                    **group_info,
                 }
+
+                if not tails:
+                    statistic, p_value = proportions_ztest(
+                        count=counts,
+                        nobs=nobs
+                    )
+
+                    result.update({
+                        "test 0": "z_test_proportions",
+                        "statistic 0": float(statistic),
+                        "p_value 0": float(p_value),
+                        "significant 0": bool(p_value < alpha),
+                        "tail 0": [],
+                        "result 0": (
+                            f"column {control_col} value {control_value} and "
+                            f"column {treatment_col} value {treatment_value} were significantly different"
+                            if p_value < alpha
+                            else
+                            f"column {control_col} value {control_value} and "
+                            f"column {treatment_col} value {treatment_value} were not significantly different"
+                        ),
+                    })
+
+                else:
+                    for i, current_tail in enumerate(tails):
+                        statistic, p_value = proportions_ztest(
+                            count=counts,
+                            nobs=nobs,
+                            alternative=current_tail
+                        )
+
+                        result.update({
+                            f"test {i}": "z_test_proportions",
+                            f"statistic {i}": float(statistic),
+                            f"p_value {i}": float(p_value),
+                            f"significant {i}": bool(p_value < alpha),
+                            f"tail {i}": current_tail,
+                        })
+
+                        result[f"result {i}"] = (
+                            f"column {control_col} value {control_value} was "
+                            f"{current_tail} than column {treatment_col} "
+                            f"value {treatment_value}"
+                            if p_value < alpha
+                            else
+                            f"column {control_col} value {control_value} was not "
+                            f"{current_tail} than column {treatment_col} "
+                            f"value {treatment_value}"
+                        )
+
                 if min(nobs) * min(
-                    counts[i] / nobs[i] if nobs[i] else 0 for i in range(len(nobs))
+                    counts[i] / nobs[i] if nobs[i] else 0
+                    for i in range(len(nobs))
                 ) < 5:
                     result["warning"] = (
                         "Normal approximation for proportions may be unreliable when "
                         "n*p or n*(1-p) is small in either group (rule of thumb: >=5)."
                     )
+
                 return result
             
             elif test_name == "manova":
