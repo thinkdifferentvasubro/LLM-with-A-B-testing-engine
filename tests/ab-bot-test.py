@@ -16,13 +16,21 @@ class ab_bot_eval:
         self.dataset_name="a-b dataset"
 
     def start_eval(self):
-        experiment_results=client.evaluate(
+        result=client.evaluate(
             self.ab_app,
             data=self.dataset_name,
             evaluators=[self.correctness],
             experiment_prefix="vasu-robin"
             )
-        return experiment_results
+        failures = []
+        for row in result:
+            for eval_result in row["evaluation_results"]["results"]:
+                if eval_result.key == "correctness" and eval_result.score is not True:
+                    failures.append(row["example"].id)
+
+        assert not failures, f"Correctness failed for examples: {failures}"
+        print("All examples passed correctness ✅")
+        return None
 
     @staticmethod
     def correctness(

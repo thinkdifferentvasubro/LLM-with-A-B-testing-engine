@@ -15,13 +15,22 @@ class rag_eval:
         self.dataset_name="rag Evaluation"
 
     def start_rag_eval(self):
-        experiment_results=client.evaluate(
+        result = client.evaluate(
             self.rag_search,
             data=self.dataset_name,
             evaluators=[self.rag_correctness],
             experiment_prefix="vasu-robin"
             )
-        return experiment_results
+
+        failures = []
+        for row in result:
+            for eval_result in row["evaluation_results"]["results"]:
+                if eval_result.key == "rag_correctness" and eval_result.score is not True:
+                    failures.append(row["example"].id)
+
+        assert not failures, f"RAG correctness failed for examples: {failures}"
+        print("All examples passed rag_correctness ✅")
+        return None
 
     @staticmethod
     def rag_correctness(
@@ -46,20 +55,25 @@ class rag_eval:
             HumanMessage(content=user_content)
         ]).content.strip().upper()
         return "CORRECT" in response and "INCORRECT" not in response
+        
 
     @staticmethod
-    def rag_search(query = "what is that test we conducted where the groups were psa and ad", 
-                   n_results = 1, 
-                   user_id = "139fd288-bbfd-4e9b-9729-b7d8f6299b10"
-                   ) -> dict:
+    def rag_search(
+        inputs: dict
+        ) -> dict:
+    
+        user_id = "139fd288-bbfd-4e9b-9729-b7d8f6299b10"
+        n_results = 1
         rag_results = VectorDBManager().retrieve_data(
-            query=query,
+            query=inputs["question"],
             n_results=n_results,
             user_id=user_id
             )
+        
         final_rag_result = "Rag results: "
         for rag_result in rag_results["documents"]:
             if not rag_result:
                 return "could not find the related test/experiment"
             final_rag_result += rag_result[0]
         return {"response": final_rag_result}
+    
