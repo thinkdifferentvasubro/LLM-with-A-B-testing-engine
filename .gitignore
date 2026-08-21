@@ -1,7 +1,6 @@
 .trash/
-mlruns/
 __pycache__/
-app/chroma_db
+chroma_db/
 src/RAG/models/
 app/uploads
 app/users.json

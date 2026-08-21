@@ -7,11 +7,15 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 from sentence_transformers import SentenceTransformer
 from chromadb.utils import embedding_functions
 import chromadb
+from pathlib import Path
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "models", "all-MiniLM-L6-v2")
 embedding_model = SentenceTransformer(MODEL_PATH)
 
+file_path = Path(__file__).resolve()
+db_parent_dir = file_path.parents[2]
+db_path = os.path.join(db_parent_dir, "chroma_db")
 
 class LocalSentenceTransformerEmbeddingFunction(embedding_functions.EmbeddingFunction):
 
@@ -27,7 +31,7 @@ class VectorDBManager:
     def __init__(
         self,
         collection_name: str = "my_collection",
-        persist_directory: str = "./chroma_db",
+        persist_directory: str = db_path,
     ):
         self.collection_name = collection_name
         self.persist_directory = persist_directory

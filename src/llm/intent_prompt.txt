@@ -1,26 +1,29 @@
-Classify the user's message as exactly one of: "conduct test", "retrieve tests", "both", "chat". Output only the label string, no explanation.
-
-You are given the full conversation so far. Use the conversation history to understand references and determine whether the user is referring to an existing result or requesting a new analysis.
+Classify the user's message as exactly one of: "conduct test", "retrieve tests", "both", or "chat".
+Use the full conversation history to determine the user's intent. For "conduct test", "retrieve tests", or "both", set only `message_intent` and leave `response` empty. For "chat", set `message_intent` to "chat" and directly answer the user's message in `response`.
 
 Source scope:
 - "In-session output" means any result, statistic, test, interpretation, or conclusion already produced by the assistant earlier in the current conversation.
 - "Historical test records" means stored or logged results from previous runs or sessions that are not already present in the current conversation.
-- A reference to something already present in the current conversation must not be treated as a historical retrieval request.
+- A result already present in the current conversation must never be treated as a historical retrieval request.
 
 Intent definitions:
-- "conduct test": The user wants a new statistical analysis to be performed on the currently provided dataset. This includes requests to run, rerun, repeat, redo, recalculate, perform, execute, or conduct an analysis. It also includes data-driven questions where answering the question requires analyzing the provided dataset, even if a related analysis was already performed earlier in the conversation.
+- "conduct test": The user wants a new statistical analysis to be performed on the currently provided dataset. This includes requests to run, rerun, repeat, redo, recalculate, perform, execute, or conduct an analysis. It also includes data-driven questions where answering requires analyzing the provided dataset, even if a related analysis was already performed earlier.
 - "retrieve tests": The user wants results or information from a previously completed test stored in historical test records. The request must refer to a historical test rather than results already available in the current conversation.
 - "both": The user explicitly requests a new analysis on the provided dataset while also requesting retrieval or comparison with a historical test record in the same message.
-- "chat": The user is only asking for explanation, interpretation, clarification, restatement, or general conversation and does not request a new analysis or historical test retrieval.
+- "chat": The user only wants to explain, interpret, clarify, restate, or discuss an existing in-session result, or is having a normal conversation without requesting a new analysis or historical retrieval.
 
 Priority rules:
-1. An explicit request for a new analysis always takes priority over interpreting an existing result. If the user asks to run, rerun, repeat, redo, recalculate, or otherwise perform the analysis again on the provided dataset, classify as "conduct test".
-2. A follow-up question about an existing in-session result is "chat" when the user only wants the existing result explained, clarified, restated, or interpreted.
-3. If answering the user's question requires analyzing the provided dataset again, classify as "conduct test", even when the conversation already contains a related analysis.
-4. Do not classify a message as "retrieve tests" merely because it refers to a metric, variable, group, test, or result. Retrieval requires that the referenced result comes from historical records.
-5. "both" requires both actions in the same request: a new analysis of the provided dataset and retrieval/comparison with a historical test record.
-6. Statements or questions about differences, equality, balance, direction, significance, or relationships between variables/groups are part of a dataset analysis when answering them requires analyzing the provided dataset.
-7. A request to determine a missing detail from an existing result is "chat" if the existing result already contains enough information to answer it without performing a new analysis. If determining that detail requires rerunning or analyzing the provided dataset, classify as "conduct test".
-8. If the user refers to previous conversation context without requesting a new analysis and without identifying a historical test record, classify as "chat".
-9. If the message contains multiple requests, evaluate all requests together. If any request explicitly requires a new analysis of the provided dataset and does not require historical retrieval, classify as "conduct test".
-10. If genuinely ambiguous and a dataset is available, prefer "conduct test" when the user's requested answer could reasonably require analysis of that dataset; otherwise classify as "chat".
+1. An explicit request for a new analysis takes priority over interpreting an existing result.
+2. A follow-up about an existing in-session result is "chat" when no new analysis is required.
+3. If answering requires analyzing the provided dataset again, classify as "conduct test", even if a related analysis was already performed.
+4. Do not classify as "retrieve tests" merely because the user refers to a metric, variable, group, test, or result. Retrieval requires a historical test record.
+5. "both" requires both a new dataset analysis and historical retrieval/comparison in the same request.
+6. Questions about differences, equality, balance, direction, significance, or relationships between variables/groups are dataset analysis when answering requires analyzing the dataset.
+7. Determining a missing detail from an existing result is "chat" if the existing result contains enough information. If it requires analyzing the dataset, use "conduct test".
+8. Referring to previous conversation context without requesting new analysis or identifying a historical test record is "chat".
+9. If multiple requests are present, evaluate them together. If any request requires a new dataset analysis and does not require historical retrieval, use "conduct test".
+10. If genuinely ambiguous and a dataset is available, prefer "conduct test" when the requested answer could reasonably require dataset analysis; otherwise use "chat".
+
+Chat behavior:
+- For "chat", directly answer using the existing conversation context.
+- Do not perform a new test or retrieve historical tests when the intent is "chat".

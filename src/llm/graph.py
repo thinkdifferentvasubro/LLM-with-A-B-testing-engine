@@ -38,7 +38,13 @@ class State(TypedDict):
     rag_result: NotRequired[str]
 
 class IntentClassifier(BaseModel):
-    message_intent: Literal["chat", "retrieve tests", "conduct test", "both"]
+    message_intent: Literal[
+        "conduct test",
+        "retrieve tests",
+        "both",
+        "chat"
+    ]
+    response: str | None = None
 
 Scalar = Union[bool, int, float, str]
 
@@ -82,22 +88,34 @@ def classify_intent(state: State):
         include_system=False,
         start_on="human"
     )
-    if not state.get("csv_path"):
-        csv_status = " csv upload status: the csv is not uploaded by the user"
-    else:
-        csv_status = " csv upload status: the data csv is uploaded by the user"
 
-    structured_lmm = llm.with_structured_output(IntentClassifier)
-    result = structured_lmm.invoke([
+    if not state.get("csv_path"):
+        csv_status = "csv upload status: the csv is not uploaded by the user"
+    else:
+        csv_status = "csv upload status: the data csv is uploaded by the user"
+
+    structured_llm = llm.with_structured_output(IntentClassifier)
+
+    result = structured_llm.invoke([
         {
             "role": "system",
             "content": intent_prompt + csv_status
         }
     ] + trimmed)
-    print("intent")
+
+    print("intent:", result.message_intent)
+
+    messages = [RemoveMessage(id=REMOVE_ALL_MESSAGES), *trimmed]
+
+    if result.message_intent == "chat" and result.response:
+        messages.append({
+            "role": "assistant",
+            "content": result.response
+        })
+
     return {
         "message_intent": result.message_intent,
-        "messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES)] + trimmed,
+        "messages": messages,
     }
 
 def conduct_test(state: State):
@@ -208,7 +226,7 @@ graph_builder.add_conditional_edges(
     "classifier",
     lambda state: state["message_intent"],
     {
-        "chat": "reasoning",
+        "chat": END,
         "conduct test": "ab_test_agent",
         "retrieve tests": "rag_agent",
         "both": "both_"
@@ -218,7 +236,6 @@ graph_builder.add_conditional_edges(
 graph_builder.add_edge("ab_test_agent", "reasoning")
 graph_builder.add_edge("rag_agent", "reasoning")
 graph_builder.add_edge("both_", "reasoning")
-graph_builder.add_edge("reasoning", END)
 
 graph = graph_builder.compile(checkpointer=InMemorySaver())
 

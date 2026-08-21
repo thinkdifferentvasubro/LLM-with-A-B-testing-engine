@@ -1,0 +1,65 @@
+import os
+import sys
+import uuid
+from langsmith import Client
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import SystemMessage, HumanMessage
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from src.RAG.rag_pipeline import VectorDBManager
+
+client = Client()
+
+class rag_eval:
+    def __init__(self):
+        self.dataset_name="rag Evaluation"
+
+    def start_rag_eval(self):
+        experiment_results=client.evaluate(
+            self.rag_search,
+            data=self.dataset_name,
+            evaluators=[self.rag_correctness],
+            experiment_prefix="vasu-robin"
+            )
+        return experiment_results
+
+    @staticmethod
+    def rag_correctness(
+            inputs: dict,
+            outputs: dict,
+            reference_outputs: dict
+            )->bool:
+        eval_instructions = "You are an expert professor specialized in grading students' answers to questions."
+        user_content = f"""You are grading the following question:
+        {inputs['question']}
+        Here is the real answer:
+        {reference_outputs['answer']}
+        You are grading the following predicted answer:
+        {outputs['response']}
+        Respond with CORRECT or INCORRECT:
+        Grade:"""
+        
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0, max_retries=1)
+
+        response = llm.invoke([
+            SystemMessage(content=eval_instructions),
+            HumanMessage(content=user_content)
+        ]).content.strip().upper()
+        return "CORRECT" in response and "INCORRECT" not in response
+
+    @staticmethod
+    def rag_search(query = "what is that test we conducted where the groups were psa and ad", 
+                   n_results = 1, 
+                   user_id = "139fd288-bbfd-4e9b-9729-b7d8f6299b10"
+                   ) -> dict:
+        rag_results = VectorDBManager().retrieve_data(
+            query=query,
+            n_results=n_results,
+            user_id=user_id
+            )
+        final_rag_result = "Rag results: "
+        for rag_result in rag_results["documents"]:
+            if not rag_result:
+                return "could not find the related test/experiment"
+            final_rag_result += rag_result[0]
+        return {"response": final_rag_result}

@@ -1,9 +1,0 @@
-question: which group has higher conversion and does each group has same total ads
-answer: 
-Based on the A/B test results:
-
-Regarding conversion, the group identified as 'psa' showed a significantly higher conversion rate compared to the 'ad' group. A Fisher's exact test indicated this difference was statistically significant, with a p-value of 0.0.
-
-Regarding the total number of ads, the two groups did not have the same total ads. A Mann-Whitney U test revealed a statistically significant difference between the 'psa' and 'ad' groups, with a p-value of 0.0.
-
-For both analyses, we checked the balance of pre-treatment covariates. The covariate 'most ads hour' had a standardized mean difference (SMD) of -0.06, and 'most ads day' had an SMD of 0.08. These values are small, suggesting that these covariates were well-balanced between the 'psa' and 'ad' groups, making them suitable for adjustment if needed.
