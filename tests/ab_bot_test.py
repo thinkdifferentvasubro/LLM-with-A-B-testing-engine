@@ -64,7 +64,3 @@ class ab_bot_eval:
          file_path = os.path.join(BASE_DIR, "marketing_AB.csv")
          ans_ = ask(user_message=inputs["question"], user_id="139fd288-bbfd-4e9b-9729-b7d8f6299b10", thread_id=thread_id, csv_path=file_path)
          return {"response": ans_}
-
-result = ab_bot_eval().start_eval()
-for row in result:
-    print(row)
