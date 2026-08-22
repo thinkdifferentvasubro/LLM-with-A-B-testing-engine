@@ -1,5 +1,4 @@
 from langsmith import Client
-from langsmith import wrappers
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
 import os
