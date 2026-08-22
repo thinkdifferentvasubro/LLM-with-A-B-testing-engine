@@ -29,7 +29,7 @@ class ab_bot_eval:
                     failures.append(row["example"].id)
 
         assert not failures, f"Correctness failed for examples: {failures}"
-        print("All examples passed correctness ✅")
+        print("All examples passed correctness")
         return None
 
     @staticmethod
@@ -61,7 +61,9 @@ class ab_bot_eval:
             inputs: dict
             ):
          thread_id = str(uuid.uuid4())
-         ans_ = ask(user_message=inputs["question"], user_id="139fd288-bbfd-4e9b-9729-b7d8f6299b10", thread_id=thread_id, csv_path=r"C:\projects\resume\marketing_AB.csv")
+         BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+         file_path = os.path.join(BASE_DIR, "marketing_AB.csv")
+         ans_ = ask(user_message=inputs["question"], user_id="139fd288-bbfd-4e9b-9729-b7d8f6299b10", thread_id=thread_id, csv_path=file_path)
          return {"response": ans_}
 
 result = ab_bot_eval().start_eval()

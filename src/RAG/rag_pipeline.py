@@ -1,9 +1,5 @@
 import os
 import hashlib
-
-os.environ.setdefault("HF_HUB_OFFLINE", "1")
-os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-
 from sentence_transformers import SentenceTransformer
 from chromadb.utils import embedding_functions
 import chromadb
@@ -11,8 +7,24 @@ from pathlib import Path
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "models", "all-MiniLM-L6-v2")
-embedding_model = SentenceTransformer(MODEL_PATH)
+MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 
+def ensure_model_available(model_path: str, model_name: str):
+    marker = os.path.join(model_path, "config.json")
+    if not os.path.exists(marker):
+        # Not cached locally — download in online mode
+        os.environ.pop("HF_HUB_OFFLINE", None)
+        os.environ.pop("TRANSFORMERS_OFFLINE", None)
+        print(f"Model not found at {model_path}, downloading {model_name}...")
+        model = SentenceTransformer(model_name)
+        model.save(model_path)
+        return model
+    else:
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+        return SentenceTransformer(model_path)
+
+embedding_model = ensure_model_available(MODEL_PATH, MODEL_NAME)
 file_path = Path(__file__).resolve()
 db_parent_dir = file_path.parents[2]
 db_path = os.path.join(db_parent_dir, "chroma_db")
