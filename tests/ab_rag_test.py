@@ -38,7 +38,12 @@ class rag_eval:
             outputs: dict,
             reference_outputs: dict
             )->bool:
-        eval_instructions = "You are an expert professor specialized in grading students' answers to questions."
+        eval_instructions = """
+        You are an expert evaluator. Compare the assistant's answer with the reference answer.
+        Return True if the answer is substantially correct and preserves the main conclusions,
+        allowing differences in wording, structure, and minor omissions. Return False only if
+        there is a major factual error, contradiction, or different conclusion.
+        """
         user_content = f"""You are grading the following question:
         {inputs['question']}
         Here is the real answer:
