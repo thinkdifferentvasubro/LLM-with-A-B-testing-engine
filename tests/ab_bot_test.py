@@ -21,9 +21,7 @@ class ab_bot_eval:
             evaluators=[self.correctness],
             experiment_prefix="vasu-robin"
             )
-        print("result---", result)
         failures = []
-        print("failures---", failures)
         for row in result:
             for eval_result in row["evaluation_results"]["results"]:
                 if eval_result.key == "correctness" and eval_result.score is not True:
