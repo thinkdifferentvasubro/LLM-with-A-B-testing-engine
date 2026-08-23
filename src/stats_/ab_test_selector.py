@@ -9,7 +9,7 @@ import os
 import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from RAG.rag_pipeline import VectorDBManager
+from src.RAG.rag_pipeline import VectorDBManager
 
 
 class ABTestSelector:
