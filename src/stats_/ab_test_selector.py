@@ -9,7 +9,7 @@ import os
 import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from src.RAG.rag_pipeline import VectorDBManager
+from RAG.rag_pipeline import VectorDBManager
 
 
 class ABTestSelector:
@@ -936,6 +936,8 @@ class ABTestSelector:
                 return result
 
             elif test_name == "chisquare":
+                if tail:
+                    return "chisquare test does not support one tail test"
                 table = pd.crosstab([sub[c] for c in allocation_col], sub[metric_col[0]])
                 chi2, p_value, dof, expected = stats.chi2_contingency(table)
                 result = {
