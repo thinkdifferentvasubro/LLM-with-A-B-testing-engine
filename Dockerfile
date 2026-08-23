@@ -5,7 +5,7 @@ WORKDIR /app
 COPY docker_requirements.txt .
 
 COPY src/ /app/src/
-COPY the_app/ /app/api
+COPY api/ /app/api
 
 RUN pip install --no-cache-dir -r docker_requirements.txt
 RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2').save('src/RAG/models/all-MiniLM-L6-v2')"
