@@ -1,4 +1,4 @@
-# A/B Testing Agent with Long-Term Memory
+# A/B Testing Agent with RAG-Based Experiment Memory
 
 An LLM-orchestrated A/B testing system: the LLM designs experiments and interprets results, a deterministic statistical engine runs the actual tests, and a RAG layer remembers past experiments per user.
 
