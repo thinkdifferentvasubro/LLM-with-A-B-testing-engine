@@ -197,10 +197,10 @@ class ABTestSelector:
                 readable_key = key.replace("_", " ")
                 out += f"The {readable_key} was {value}.\n"
 
-        VectorDBManager().save_data(
-            document=out,
-            user_id=self.user_id
-            )
+            VectorDBManager().save_data(
+                document=out,
+                user_id=self.user_id
+                )
 
         return out
     
