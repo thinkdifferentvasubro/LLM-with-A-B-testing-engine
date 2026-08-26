@@ -106,13 +106,10 @@ class ABTestSelector:
 
                     )
 
-            if not isinstance(result, str):
-                out = self.convert_to_str(episode=episode, result=result)
-                results += out
-                VectorDBManager().save_data(
-                    document=out,
-                    user_id=self.user_id
-                    )
+            
+            out = self.convert_to_str_and_save_(episode=episode, result=result)
+            results += out
+                
         return results
 
     def extract_mask_from_episode(self, episode: dict, dataset: pd.DataFrame):
@@ -132,7 +129,7 @@ class ABTestSelector:
 
         return mask, list(allocation_columns)
     
-    def convert_to_str(self, episode: dict, result: dict):
+    def convert_to_str_and_save_(self, episode: dict, result: dict):
         out = ""
         control_name = next(iter(episode["pairs"]))
         control_value = episode["pairs"][control_name]["control_value"]
@@ -193,9 +190,17 @@ class ABTestSelector:
             )
 
         out += "\nStatistical Test Results:\n\n"
-        for key, value in result.items():
-            readable_key = key.replace("_", " ")
-            out += f"The {readable_key} was {value}.\n"
+        if isinstance(result, str):
+            out += result
+        else:
+            for key, value in result.items():
+                readable_key = key.replace("_", " ")
+                out += f"The {readable_key} was {value}.\n"
+
+        VectorDBManager().save_data(
+            document=out,
+            user_id=self.user_id
+            )
 
         return out
     
