@@ -32,7 +32,7 @@ class ABTestSelector:
     def run_pipeline(self):
         results = ""
         for episode in self.episodes:
-            if not episode:
+            if not episode["pairs"]:
                 result = "could not find proper schema"
             df = self.dataset.copy()
             mask, allocation_columns = self.extract_mask_from_episode(episode=episode, dataset=df)
