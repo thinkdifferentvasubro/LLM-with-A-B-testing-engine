@@ -28,6 +28,8 @@ class Preprocessor:
     def run_pipeline(self):
         dataset = self.dataset
         self.Assignment_cols, self.Final_metric_col =  self.extract_episode_columns()
+        if self.Assignment_cols is None and self.Final_metric_col is None:
+            return None, None
         cols = self.Assignment_cols + self.Final_metric_col + self.Covariate_cols
         dataset = dataset[cols]
         dataset = self.remove_duplicates(dataset)
@@ -59,17 +61,22 @@ class Preprocessor:
     def extract_episode_columns(self):
         allocation_col = set()
         metrices = set()
+        episodes_presence = []
 
         for episode in self.episodes:
+            if not episode["pairs"]:
+                episodes_presence.append(True)
+                continue
             controls = list(episode["pairs"].keys())
             for control in controls:
                 allocation_col.update([control])
 
                 for treatment in episode["pairs"][control]["treatment"]:
                     allocation_col.update([treatment[0]])
-
             metric = episode["metrics"]
             metrices.update(metric)
+        if not episodes_presence:
+            return None, None
 
         return list(allocation_col), list(metrices)
 
