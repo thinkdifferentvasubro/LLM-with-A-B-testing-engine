@@ -54,6 +54,13 @@ Args:
           column in the schema (conversion, revenue, clicks, signup,
           retention, ctr, duration, etc., as opposed to identifiers,
           allocation columns, or pre-treatment attributes).
+        - If, after checking both the schema and the user's request, no
+          valid control/treatment pair or no valid metric can be found
+          or reasonably inferred for a given comparison, do not guess or
+          fabricate a pair, allocation column, value, or metric to fill
+          the episode. Instead set pairs={{}}, metrics=[], and tail=[]
+          for that episode (test and p_value keep their normal defaults:
+          test="", p_value=0.05 unless the user specified alpha).
         Ignore user-excluded columns. Normally one allocation column per
         episode unless the user explicitly compares multiple. For
         multi-group tests (anova, kruskalwallis, manova), choose a

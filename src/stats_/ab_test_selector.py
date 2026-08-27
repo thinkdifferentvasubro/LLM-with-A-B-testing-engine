@@ -42,7 +42,7 @@ class ABTestSelector:
             tail = episode["tail"]
             test = episode["test"]
 
-            if test:
+            elif test:
                 result = self.run_selected_test(
                     test_name = test,
                     df = df,
